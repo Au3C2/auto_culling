@@ -510,7 +510,7 @@ def load_image_ffmpeg(path: Path, scale_width: int = 1280) -> np.ndarray | None:
     # 1. First try in-process pyav (self-probed, fastest, zero-subprocess, no window popup)
     img_pyav = _load_image_pyav(path, scale_width=scale_width)
     if img_pyav is not None:
-        log.info("HEIF decode path: in-process av/VideoToolbox")
+        log.info("HEIF decode path: pyav (in-process av/VideoToolbox)")
         return img_pyav
 
     # 2. Subprocess fallback only if in-process pyav is unavailable or failed
