@@ -209,7 +209,11 @@ def organize_dist_artifacts() -> list[Path]:
 
     elif sys.platform == "win32":
         # 1. NSIS Setup Exe
-        nsis_candidates = list((bundle_dir / "nsis").glob("*.exe"))
+        nsis_candidates = sorted(
+            (bundle_dir / "nsis").glob("*.exe"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
         if nsis_candidates:
             src_exe = nsis_candidates[0]
             dst_exe = dist_dir / f"AutoCulling_v{ver}_win_x64_setup.exe"
@@ -225,6 +229,15 @@ def organize_dist_artifacts() -> list[Path]:
             portable_zip = dist_dir / f"AutoCulling_v{ver}_win_x64_portable.zip"
             with zipfile.ZipFile(portable_zip, "w", zipfile.ZIP_DEFLATED) as z:
                 z.write(release_exe, "AutoCulling.exe")
+                # Ensure WebView2Loader.dll sits next to AutoCulling.exe
+                wv2_candidates = [
+                    SRC_TAURI / "target/release/WebView2Loader.dll",
+                    SRC_TAURI / "resources/WebView2Loader.dll",
+                ]
+                for wv2 in wv2_candidates:
+                    if wv2.exists():
+                        z.write(wv2, "WebView2Loader.dll")
+                        break
                 for f in sorted(sidecar_stage.rglob("*")):
                     if f.is_file():
                         z.write(f, str(f.relative_to(SRC_TAURI)))

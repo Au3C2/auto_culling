@@ -37,9 +37,10 @@
         "applicationFolderPosition": { "x": 481, "y": 221 }
       }
     },
-    "resources": [
-      "resources/sidecar"
-    ],
+    "resources": {
+      "resources/sidecar": "resources/sidecar",
+      "resources/WebView2Loader.dll": "WebView2Loader.dll"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

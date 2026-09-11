@@ -109,6 +109,8 @@ fn ensure_sidecar(app: &AppHandle, state: &mut SidecarState) -> Result<(), Strin
     if let Some(dir) = &exe_dir {
         candidates.push(dir.join(sidecar_name));
         candidates.push(dir.join("sidecar").join(sidecar_name));
+        candidates.push(dir.join("resources").join("sidecar").join(sidecar_name));
+        candidates.push(dir.join("resources").join(sidecar_name));
         if let Some(parent) = dir.parent() {
             // macOS .app: <App>.app/Contents/MacOS -> ../Resources
             candidates.push(parent.join("Resources/sidecar").join(sidecar_name));

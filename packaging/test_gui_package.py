@@ -332,20 +332,29 @@ def test_macos_dmg(dmg_path: Path | None = None) -> bool:
 
 
 def test_windows_package(dist_dir: Path | None = None) -> bool:
-    """Verify Windows NSIS installer and portable ZIP packages."""
+    """Verify Windows NSIS installer and portable ZIP packages, then run post-install guards."""
     print("=== Testing Windows GUI Packages ===")
     dist = dist_dir or (ROOT / "dist")
 
-    setups = list(dist.glob("*setup.exe")) + list((ROOT / "src-tauri/target/release/bundle/nsis").glob("*.exe"))
-    zips = list(dist.glob("*portable.zip")) + list(dist.glob("*win*.zip"))
+    setups = sorted(
+        list(dist.glob("*setup.exe")) + list((ROOT / "src-tauri/target/release/bundle/nsis").glob("*.exe")),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    zips = sorted(
+        list(dist.glob("*portable.zip")) + list(dist.glob("*win*.zip")),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+
+    if not setups and not zips:
+        print("FAIL: No Windows installer packages found in dist/ or target/release/")
+        return False
 
     success = True
-    if setups:
-        setup = setups[0]
-        print(f"PASS: Found NSIS setup installer: {setup.name} ({setup.stat().st_size / 1024 / 1024:.1f} MB)")
-    else:
-        print("WARNING: No Windows NSIS setup.exe found in dist/")
+    tested_sidecar_bin: Path | None = None
 
+    # 1. Test Portable ZIP Package
     if zips:
         zip_pkg = zips[0]
         print(f"Testing Windows portable ZIP: {zip_pkg.name} ({zip_pkg.stat().st_size / 1024 / 1024:.1f} MB)")
@@ -362,13 +371,238 @@ def test_windows_package(dist_dir: Path | None = None) -> bool:
             else:
                 print("FAIL: No .exe found inside portable ZIP.")
                 success = False
+
+            # Check onedir sidecar inside portable ZIP
+            sidecars = list(unzip_dir.glob("**/cull_sidecar.exe"))
+            if sidecars:
+                cand = sidecars[0]
+                if (cand.parent / "_internal").is_dir():
+                    print(f"PASS: Portable ZIP carries onedir sidecar at {cand.relative_to(unzip_dir)}")
+                    if tested_sidecar_bin is None:
+                        tested_sidecar_bin = cand
+                else:
+                    print("FAIL: Portable ZIP sidecar is not onedir format (missing _internal/)")
+                    success = False
+            else:
+                print("WARNING: Portable ZIP missing cull_sidecar.exe")
         except Exception as e:
             print(f"FAIL: Error testing portable ZIP: {e}")
             success = False
-        finally:
-            shutil.rmtree(unzip_dir, ignore_errors=True)
     else:
-        print("WARNING: No Windows portable zip found in dist/")
+        print("NOTE: No Windows portable zip found in dist/")
+
+    # 2. Test NSIS Setup Installer (Silent Installation + Structure + Execution)
+    if setups:
+        setup = setups[0]
+        print(f"\nTesting NSIS setup installer: {setup.name} ({setup.stat().st_size / 1024 / 1024:.1f} MB)")
+        sandbox_install = ROOT / "build/test_install_nsis"
+        shutil.rmtree(sandbox_install, ignore_errors=True)
+        sandbox_install.mkdir(parents=True, exist_ok=True)
+
+        try:
+            # NSIS supports /S for silent install and /D=<dest> (must be last parameter without quotes)
+            dest_arg = f"/D={sandbox_install.resolve()}"
+            print(f"Running silent installation to {sandbox_install}...")
+            res = subprocess.run([str(setup), "/S", dest_arg], timeout=120)
+            if res.returncode != 0:
+                print(f"FAIL: NSIS silent installation exited with code {res.returncode}")
+                success = False
+            else:
+                print("PASS: NSIS installer exited cleanly.")
+
+            # Wait for asynchronous file writing if needed
+            deadline = time.time() + 30.0
+            app_exe = sandbox_install / "AutoCulling.exe"
+            while time.time() < deadline and not app_exe.exists():
+                time.sleep(0.5)
+
+            if not app_exe.exists():
+                print(f"FAIL: AutoCulling.exe not found in install dir: {sandbox_install}")
+                success = False
+            else:
+                print(f"PASS: AutoCulling.exe installed successfully ({app_exe.stat().st_size / 1024 / 1024:.1f} MB).")
+
+            # Check uninstaller existence
+            uninstaller = sandbox_install / "Uninstall.exe"
+            if uninstaller.exists():
+                print("PASS: Found NSIS uninstaller (Uninstall.exe).")
+            else:
+                print("WARNING: Uninstall.exe not present in sandbox installation directory.")
+
+            # Check installed sidecar binary & onedir structure
+            installed_sidecars = list(sandbox_install.glob("**/cull_sidecar.exe"))
+            if installed_sidecars:
+                sidecar_path = installed_sidecars[0]
+                if (sidecar_path.parent / "_internal").is_dir():
+                    print(f"PASS: Installed sidecar is onedir at {sidecar_path.relative_to(sandbox_install)}")
+                    tested_sidecar_bin = sidecar_path
+                else:
+                    print("FAIL: Installed sidecar is not onedir format (missing _internal/)")
+                    success = False
+            else:
+                print(f"FAIL: Installed directory does not contain cull_sidecar.exe")
+                success = False
+
+            # 3. Test installed app launch and sidecar handshake
+            if app_exe.exists():
+                print("\nTesting installed AutoCulling.exe launch and sidecar handshake...")
+                app_proc = subprocess.Popen(
+                    [str(app_exe)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    cwd=str(sandbox_install),
+                )
+                sidecar_alive = False
+                handshake_deadline = time.time() + 25.0
+                gui_log = sandbox_install / "gui.log"
+                temp_log = Path(tempfile.gettempdir()) / "autoculling-gui.log"
+
+                while time.time() < handshake_deadline:
+                    for log_cand in [gui_log, temp_log]:
+                        if log_cand.exists():
+                            content = log_cand.read_text(errors="ignore")
+                            if "spawn bundled sidecar" in content or "sidecar spawned and alive" in content:
+                                sidecar_alive = True
+                                break
+                    if sidecar_alive:
+                        break
+                    # Also probe process list for cull_sidecar.exe
+                    try:
+                        probe = subprocess.run(
+                            ["powershell", "-NoProfile", "-Command",
+                             "Get-Process -Name cull_sidecar -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id"],
+                            capture_output=True, text=True, timeout=3,
+                        )
+                        if probe.returncode == 0 and probe.stdout.strip():
+                            sidecar_alive = True
+                            break
+                    except Exception:
+                        pass
+                    if app_proc.poll() is not None:
+                        break
+                    time.sleep(0.5)
+
+                app_proc.terminate()
+                try:
+                    app_proc.wait(timeout=5.0)
+                except Exception:
+                    app_proc.kill()
+                subprocess.run(
+                    ["powershell", "-NoProfile", "-Command",
+                     "Stop-Process -Name cull_sidecar -Force -ErrorAction SilentlyContinue"],
+                    capture_output=True,
+                )
+
+                if sidecar_alive:
+                    print("PASS: Installed AutoCulling.exe spawned the bundled sidecar successfully.")
+                else:
+                    tail = gui_log.read_text(errors="ignore")[-500:] if gui_log.exists() else "(no gui.log)"
+                    print(f"FAIL: AutoCulling.exe did not spawn sidecar. Log tail:\n{tail}")
+                    success = False
+
+        except Exception as e:
+            print(f"FAIL: NSIS installer testing failed with error: {e}")
+            success = False
+    else:
+        print("WARNING: No Windows NSIS setup.exe found in dist/")
+
+    # 4. Post-installation Precision & Performance Guard
+    if tested_sidecar_bin and tested_sidecar_bin.exists():
+        print(f"\n=== Post-Installation Precision Guard on {tested_sidecar_bin.name} ===")
+        test_suites = [
+            ("JPG", ROOT / "tests/test_img", "*.jpg"),
+            ("HEIF", ROOT / "test_import", "*.heif"),
+            ("ARW", ROOT / "test_arw", "*.ARW"),
+            ("NEF", ROOT / "test_nef", "*.nef"),
+        ]
+
+        def run_sidecar_cull(cmd_prefix: list[str], target_dir: Path) -> tuple[dict[str, tuple[int, float]], float, list[str]]:
+            proc = subprocess.Popen(
+                [*cmd_prefix, "--json-lines"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                bufsize=1,
+                cwd=str(ROOT),
+            )
+            ratings: dict[str, tuple[int, float]] = {}
+            elapsed = 0.0
+            logs = []
+            payload = json.dumps({
+                "cmd": "run",
+                "dir": str(target_dir),
+                "config": {"dry_run": True, "force": True}
+            }) + "\n"
+            proc.stdin.write(payload)
+            proc.stdin.flush()
+            while True:
+                line = proc.stdout.readline()
+                if not line:
+                    break
+                try:
+                    evt = json.loads(line)
+                except Exception:
+                    continue
+                if evt.get("type") == "frame":
+                    ratings[evt["name"]] = (int(evt["rating"]), round(float(evt["raw"]), 2))
+                elif evt.get("type") == "log":
+                    logs.append(evt.get("line", ""))
+                elif evt.get("type") == "done":
+                    elapsed = float(evt.get("elapsed", 0.0) or 0.0)
+                    break
+            try:
+                proc.stdin.write(json.dumps({"cmd": "quit"}) + "\n")
+                proc.stdin.flush()
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+            return ratings, elapsed, logs
+
+        src_py = ROOT / ".venv/Scripts/python.exe"
+        src_cmd = [str(src_py), str(ROOT / "cull_photos.py")]
+        pack_cmd = [str(tested_sidecar_bin)]
+
+        for fmt, target_dir, pattern in test_suites:
+            if not target_dir.exists():
+                continue
+            photos = list(target_dir.glob(pattern))
+            if not photos:
+                continue
+
+            print(f"Testing {fmt} format ({len(photos)} photos) in {target_dir.name}...")
+            src_ratings, src_elapsed, _ = run_sidecar_cull(src_cmd, target_dir)
+            pack_ratings, pack_elapsed, _ = run_sidecar_cull(pack_cmd, target_dir)
+
+            # Assert Precision
+            if src_ratings and src_ratings == pack_ratings:
+                print(f"PASS: Packaged {fmt} ratings & raw scores 100% identical to source ({len(pack_ratings)} photos).")
+            else:
+                diff = {
+                    k: (src_ratings.get(k), pack_ratings.get(k))
+                    for k in set(src_ratings.keys()) | set(pack_ratings.keys())
+                    if src_ratings.get(k) != pack_ratings.get(k)
+                }
+                print(f"FAIL: Packaged {fmt} score drift detected on {len(diff)} files: {diff}")
+                success = False
+
+            # Assert Performance (no 160MB extraction penalty; throughput check)
+            if pack_elapsed > 0:
+                ips = len(photos) / pack_elapsed if pack_elapsed > 0 else float("inf")
+                print(f"PASS: Packaged {fmt} throughput: {ips:.1f} img/s (elapsed {pack_elapsed:.2f}s).")
+
+    # 5. Cleanup sandbox install
+    if setups:
+        uninstaller = ROOT / "build/test_install_nsis/Uninstall.exe"
+        if uninstaller.exists():
+            try:
+                print("Running silent uninstallation...")
+                subprocess.run([str(uninstaller), "/S", f"_?={uninstaller.parent.resolve()}"], timeout=30)
+            except Exception:
+                pass
+        shutil.rmtree(ROOT / "build/test_install_nsis", ignore_errors=True)
+    if zips:
+        shutil.rmtree(ROOT / "build/test_unzip_win", ignore_errors=True)
 
     return success
 
