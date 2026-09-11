@@ -600,6 +600,18 @@ def test_windows_package(dist_dir: Path | None = None) -> bool:
                 subprocess.run([str(uninstaller), "/S", f"_?={uninstaller.parent.resolve()}"], timeout=30)
             except Exception:
                 pass
+        # Clean sandbox registry keys written during test to keep user environment clean
+        try:
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 "Remove-Item -Path 'HKCU:\\Software\\autoculling' -Recurse -Force -ErrorAction SilentlyContinue; "
+                 "Remove-Item -Path 'HKCU:\\Software\\AutoCulling' -Recurse -Force -ErrorAction SilentlyContinue; "
+                 "Remove-Item -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\auto-culling' -Recurse -Force -ErrorAction SilentlyContinue; "
+                 "Remove-Item -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\AutoCulling' -Recurse -Force -ErrorAction SilentlyContinue"],
+                timeout=10,
+            )
+        except Exception:
+            pass
         shutil.rmtree(ROOT / "build/test_install_nsis", ignore_errors=True)
     if zips:
         shutil.rmtree(ROOT / "build/test_unzip_win", ignore_errors=True)

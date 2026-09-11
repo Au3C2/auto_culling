@@ -165,6 +165,9 @@ def _run_exiftool(paths: list[Path]) -> list[dict]:
 
     # Build newline-separated file list for stdin
     file_list = "\n".join(str(p) for p in paths) + "\n"
+    fb_kwargs: dict = {}
+    if sys.platform == "win32":
+        fb_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 
     try:
         result = subprocess.run(
@@ -173,6 +176,7 @@ def _run_exiftool(paths: list[Path]) -> list[dict]:
             capture_output=True,
             text=True,
             check=True,
+            **fb_kwargs,
         )
     except FileNotFoundError:
         raise RuntimeError(

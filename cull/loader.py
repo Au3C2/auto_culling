@@ -106,34 +106,31 @@ def _find_exiftool_path() -> list[str]:
 def _find_ffmpeg_path() -> str:
     """Return path to bundled ffmpeg if exists, otherwise assume system-wide."""
     ext = ".exe" if sys.platform == "win32" else ""
-    # 1. Bundled (if we decided to bundle, but we won't for size)
     bundled = get_resource_path(f"external/ffmpeg/ffmpeg{ext}")
     if bundled.exists(): return str(bundled)
-    # 2. Known local path on this machine
-    for cand in [Path(r"D:\ProgramData\ffmpeg-master-latest-win64-gpl\bin\ffmpeg.exe")]:
-        if cand.exists(): return str(cand)
-    # 3. System-wide
-    return "ffmpeg"
+    import shutil as _shutil
+    found = _shutil.which(f"ffmpeg{ext}") or _shutil.which("ffmpeg")
+    return str(found) if found else "ffmpeg"
 
 def _find_ffprobe_path() -> str:
     """Return path to bundled ffprobe if exists, otherwise assume system-wide."""
     ext = ".exe" if sys.platform == "win32" else ""
-    # 1. Bundled
     bundled = get_resource_path(f"external/ffmpeg/ffprobe{ext}")
     if bundled.exists(): return str(bundled)
-    # 2. Known local path
-    for cand in [Path(r"D:\ProgramData\ffmpeg-master-latest-win64-gpl\bin\ffprobe.exe")]:
-        if cand.exists(): return str(cand)
-    # 3. System-wide
-    return "ffprobe"
+    import shutil as _shutil
+    found = _shutil.which(f"ffprobe{ext}") or _shutil.which("ffprobe")
+    return str(found) if found else "ffprobe"
 
 def probe_embedded_preview(path: Path, min_width: int = 800) -> Tuple[int, int, int] | None:
     try:
         ffprobe_bin = _find_ffprobe_path()
+        run_kwargs: dict = {"stdin": subprocess.DEVNULL}
+        if sys.platform == "win32":
+            run_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
         proc = subprocess.run(
             [ffprobe_bin, "-v", "error", "-select_streams", "v", "-show_entries", 
              "stream=index,width,height,codec_name:stream_disposition=dependent", "-of", "json", str(path)],
-            capture_output=True, text=True, timeout=10
+            capture_output=True, text=True, timeout=10, **run_kwargs
         )
         if proc.returncode != 0: return None
         import json
@@ -153,10 +150,13 @@ def probe_embedded_preview(path: Path, min_width: int = 800) -> Tuple[int, int, 
 def probe_full_dimensions(path: Path) -> Tuple[int, int] | None:
     try:
         ffprobe_bin = _find_ffprobe_path()
+        run_kwargs: dict = {"stdin": subprocess.DEVNULL}
+        if sys.platform == "win32":
+            run_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
         proc = subprocess.run(
             [ffprobe_bin, "-v", "error", "-select_streams", "v:0", "-show_entries", 
              "stream=width,height", "-of", "csv=p=0:s=x", str(path)],
-            capture_output=True, text=True, timeout=10
+            capture_output=True, text=True, timeout=10, **run_kwargs
         )
         parts = proc.stdout.strip().split("\n")[0].split("x")
         if len(parts) == 2: return int(parts[0]), int(parts[1])
@@ -507,26 +507,27 @@ def _extract_raw_tiff_direct(path: Path) -> bytes | None:
 
 
 def load_image_ffmpeg(path: Path, scale_width: int = 1280) -> np.ndarray | None:
+    # 1. First try in-process pyav (self-probed, fastest, zero-subprocess, no window popup)
+    img_pyav = _load_image_pyav(path, scale_width=scale_width)
+    if img_pyav is not None:
+        log.info("HEIF decode path: in-process av/VideoToolbox")
+        return img_pyav
+
+    # 2. Subprocess fallback only if in-process pyav is unavailable or failed
     preview = get_preview_stream(path)
     if preview is not None:
-        img_pyav = _load_image_pyav(path, scale_width=scale_width)
-        if img_pyav is not None:
-            log.info("HEIF decode path: pyav (ffprobe-probed stream)")
-            return img_pyav
         idx, w, h = preview
         try:
             ffmpeg_bin = _find_ffmpeg_path()
-            # No -hwaccel: camera HEIF previews are often HEVC Rext 4:2:2 10-bit,
-            # which consumer NVDEC cannot decode — the failed hwaccel init then
-            # falls back to software at +~110 ms/file (measured on 4070 Ti).
-            # Software decode is the same code path that produced the current
-            # gate pixels, so output is unchanged.
             cmd = [
                 ffmpeg_bin, "-hide_banner", "-v", "error",
                 "-i", str(path), "-map", f"0:{idx}",
                 "-f", "rawvideo", "-pix_fmt", "rgb24", "-frames:v", "1", "-y", "pipe:1"
             ]
-            proc = subprocess.run(cmd, capture_output=True, timeout=30)
+            run_kwargs: dict = {"stdin": subprocess.DEVNULL}
+            if sys.platform == "win32":
+                run_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+            proc = subprocess.run(cmd, capture_output=True, timeout=30, **run_kwargs)
             if proc.returncode == 0 and len(proc.stdout) == w * h * 3:
                 img = np.frombuffer(proc.stdout, dtype=np.uint8).reshape(h, w, 3)
                 if scale_width > 0 and w > scale_width * 1.2:
@@ -534,16 +535,6 @@ def load_image_ffmpeg(path: Path, scale_width: int = 1280) -> np.ndarray | None:
                     return cv2.resize(img, (scale_width, new_h), interpolation=cv2.INTER_AREA)
                 return img
         except Exception: pass
-    else:
-        # ffprobe unavailable (packaged GUI apps run with a minimal PATH that
-        # lacks Homebrew): probe streams with pyav itself instead of skipping
-        # the fast in-process path entirely. _load_image_pyav performs its own
-        # stream selection + VideoToolbox decode, identical to the source-env
-        # fast path.
-        img_pyav = _load_image_pyav(path, scale_width=scale_width)
-        if img_pyav is not None:
-            log.info("HEIF decode path: pyav (self-probed, ffprobe unavailable)")
-            return img_pyav
     return None
 
 def load_image_rgb(path: Path, scale_width: int = 0) -> np.ndarray | None:

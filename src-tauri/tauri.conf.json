@@ -37,6 +37,18 @@
         "applicationFolderPosition": { "x": 481, "y": 221 }
       }
     },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico",
+        "languages": [
+          "SimpChinese",
+          "English",
+          "TradChinese"
+        ],
+        "displayLanguageSelector": true
+      }
+    },
     "resources": {
       "resources/sidecar": "resources/sidecar",
       "resources/WebView2Loader.dll": "WebView2Loader.dll"

@@ -19,6 +19,13 @@ from cull.scorer import MIN_RAW, SHARP_THRESH, W_COMP, W_SHARP
 
 log = logging.getLogger(__name__)
 
+if platform.system() == "Windows":
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetErrorMode(0x0001 | 0x0002)  # Suppress crash dialogs
+    except Exception:
+        pass
+
 
 def subprocess_flags() -> dict:
     if platform.system() == "Windows":
