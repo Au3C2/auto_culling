@@ -106,5 +106,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: AutoCulling-Windows-Packages
-          path: dist/AutoCulling_*.zip*
+          path: |
+            dist/AutoCulling_*.exe*
+            dist/AutoCulling_*.zip*
           if-no-files-found: ignore
