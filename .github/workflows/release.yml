@@ -258,6 +258,10 @@ jobs:
           find artifacts -name 'AutoCulling_*.dmg' -exec cp -v {} release_assets/ \;
           find artifacts -name 'AutoCulling_*.exe' -exec cp -v {} release_assets/ \;
           find artifacts -name 'AutoCulling_*.zip' -exec cp -v {} release_assets/ \;
+          # CLI onefile binaries (lowercase naming) — their .sha256 are staged
+          # by the glob below, so the binaries themselves must be staged too.
+          find artifacts -name 'auto_cull_v*_win_x64.exe' -exec cp -v {} release_assets/ \;
+          find artifacts -name 'auto_cull_v*_macos_arm64' -type f -exec cp -v {} release_assets/ \;
           find artifacts -name '*.sha256' -exec cp -v {} release_assets/ \;
           echo "Staged release assets:"; ls -lh release_assets/; cat release_assets/*.sha256 2>/dev/null || true
       - name: Derive tag + what changed vs last release
