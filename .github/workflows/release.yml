@@ -73,28 +73,15 @@ jobs:
             --seed-dir tests/ci/sample --count 120 --samples 2 \
             --tolerance 0.75 --baseline-file tests/ci/ci_config.json \
             --no-prewarm --json build/ci_source.json
-      - name: Build onefile + onedir (zip) + Desktop GUI (DMG)
+      - name: Build onedir (zip) + Desktop GUI (DMG)
         run: |
           VER="${{ steps.ver.outputs.ver }}"
-          echo "Building onefile v$VER ..."
-          .venv/bin/python packaging/build.py
-          ls -lh "auto_cull_v${VER}_macos_arm64"
           echo "Building onedir v$VER ..."
           .venv/bin/python packaging/build.py --onedir
           ls -lh "dist/auto_cull_v${VER}_macos_arm64/auto_cull_v${VER}_macos_arm64"
           ONEDIR="dist/auto_cull_v${VER}_macos_arm64"
           (cd dist && zip -r -q "auto_cull_v${VER}_macos_arm64_onedir.zip" "auto_cull_v${VER}_macos_arm64")
           ls -lh "dist/auto_cull_v${VER}_macos_arm64_onedir.zip"
-          # Stash the zip outside dist/ so the next onefile --clean doesn't wipe it
-          cp "dist/auto_cull_v${VER}_macos_arm64_onedir.zip" "./auto_cull_v${VER}_macos_arm64_onedir.zip"
-          echo "Rebuilding onefile (onedir --clean wipes dist/, zip already stashed) ..."
-          .venv/bin/python packaging/build.py
-          ls -lh "auto_cull_v${VER}_macos_arm64"
-          mv "./auto_cull_v${VER}_macos_arm64_onedir.zip" "dist/auto_cull_v${VER}_macos_arm64_onedir.zip"
-          ls -lh "dist/auto_cull_v${VER}_macos_arm64_onedir.zip"
-          echo "Rebuilding onedir for warm-start perf smoke (needs --clean'd dist/) ..."
-          .venv/bin/python packaging/build.py --onedir
-          ls -lh "dist/auto_cull_v${VER}_macos_arm64/auto_cull_v${VER}_macos_arm64"
 
           echo "Building Desktop GUI DMG Installer v$VER ..."
           .venv/bin/python packaging/build_gui.py
@@ -102,11 +89,9 @@ jobs:
       - name: SHA256
         run: |
           VER="${{ steps.ver.outputs.ver }}"
-          ONEFILE="auto_cull_v${VER}_macos_arm64"
           ONEDIR_ZIP="dist/auto_cull_v${VER}_macos_arm64_onedir.zip"
-          (cd . && shasum -a 256 "$ONEFILE" | tee "dist/${ONEFILE}.sha256") || true
           (cd dist && shasum -a 256 "$(basename "$ONEDIR_ZIP")" | tee "$(basename "$ONEDIR_ZIP").sha256")
-          cat "dist/${ONEFILE}.sha256" "dist/$(basename "$ONEDIR_ZIP").sha256"
+          cat "dist/$(basename "$ONEDIR_ZIP").sha256"
       - name: Smoke — warm-start perf (packaged binary)
         timeout-minutes: 25
         run: |
@@ -123,7 +108,6 @@ jobs:
           name: macos-v${{ steps.ver.outputs.ver }}
           if-no-files-found: error
           path: |
-            auto_cull_v${{ steps.ver.outputs.ver }}_macos_arm64
             dist/auto_cull_v${{ steps.ver.outputs.ver }}_macos_arm64_onedir.zip
             dist/AutoCulling_*.dmg*
             dist/*.sha256
@@ -180,28 +164,16 @@ jobs:
             --seed-dir tests/ci/sample --count 120 --samples 2 --tolerance 0.65 `
             --baseline-file tests/ci/ci_config.json --no-prewarm `
             --json build/ci_source.json
-      - name: Build onefile + onedir (zip) + Desktop GUI (Setup + Portable)
+      - name: Build onedir (zip) + Desktop GUI (Setup + Portable)
         shell: bash
         run: |
           VER="${{ steps.ver.outputs.ver }}"
-          echo "Building onefile v$VER ..."
-          .venv/Scripts/python.exe packaging/build.py
-          ls -lh "auto_cull_v${VER}_win_x64.exe"
           echo "Building onedir v$VER ..."
           .venv/Scripts/python.exe packaging/build.py --onedir
           ls -lh "dist/auto_cull_v${VER}_win_x64/auto_cull_v${VER}_win_x64.exe"
           ONEDIR="dist/auto_cull_v${VER}_win_x64"
           powershell -NoProfile -Command "Compress-Archive -Path '$ONEDIR' -DestinationPath 'dist/auto_cull_v${VER}_win_x64_onedir.zip' -Force"
           ls -lh "dist/auto_cull_v${VER}_win_x64_onedir.zip"
-          cp "dist/auto_cull_v${VER}_win_x64_onedir.zip" "./auto_cull_v${VER}_win_x64_onedir.zip"
-          echo "Rebuilding onefile (onedir --clean wipes dist/, zip already stashed) ..."
-          .venv/Scripts/python.exe packaging/build.py
-          ls -lh "auto_cull_v${VER}_win_x64.exe"
-          mv "./auto_cull_v${VER}_win_x64_onedir.zip" "dist/auto_cull_v${VER}_win_x64_onedir.zip"
-          ls -lh "dist/auto_cull_v${VER}_win_x64_onedir.zip"
-          echo "Rebuilding onedir for warm-start perf smoke (needs --clean'd dist/) ..."
-          .venv/Scripts/python.exe packaging/build.py --onedir
-          ls -lh "dist/auto_cull_v${VER}_win_x64/auto_cull_v${VER}_win_x64.exe"
 
           echo "Building Windows Desktop GUI Packages v$VER ..."
           .venv/Scripts/python.exe packaging/build_gui.py
@@ -210,11 +182,9 @@ jobs:
         shell: bash
         run: |
           VER="${{ steps.ver.outputs.ver }}"
-          ONEFILE="auto_cull_v${VER}_win_x64.exe"
           ONEDIR_ZIP="dist/auto_cull_v${VER}_win_x64_onedir.zip"
-          (cd . && sha256sum "$ONEFILE" 2>/dev/null | tee "dist/${ONEFILE}.sha256") || (powershell -NoProfile -Command "Get-FileHash -Algorithm SHA256 '$ONEFILE' | ForEach-Object { \"\$(\$_.Hash.ToLower())  $ONEFILE\" } | Tee-Object -FilePath \"dist/${ONEFILE}.sha256\"")
           (cd dist && sha256sum "$(basename "$ONEDIR_ZIP")" 2>/dev/null | tee "$(basename "$ONEDIR_ZIP").sha256") || (powershell -NoProfile -Command "Set-Location dist; Get-FileHash -Algorithm SHA256 '$(basename "$ONEDIR_ZIP")' | ForEach-Object { \"\$(\$_.Hash.ToLower())  $(basename "$ONEDIR_ZIP")\" } | Tee-Object -FilePath \"$(basename "$ONEDIR_ZIP").sha256")
-          cat "dist/${ONEFILE}.sha256" "dist/$(basename "$ONEDIR_ZIP").sha256"
+          cat "dist/$(basename "$ONEDIR_ZIP").sha256"
       - name: Smoke — warm-start perf (packaged binary)
         timeout-minutes: 25
         run: |
@@ -232,7 +202,6 @@ jobs:
           name: windows-v${{ steps.ver.outputs.ver }}
           if-no-files-found: error
           path: |
-            auto_cull_v${{ steps.ver.outputs.ver }}_win_x64.exe
             dist/auto_cull_v${{ steps.ver.outputs.ver }}_win_x64_onedir.zip
             dist/AutoCulling_*.exe*
             dist/AutoCulling_*.zip*
@@ -258,10 +227,6 @@ jobs:
           find artifacts -name 'AutoCulling_*.dmg' -exec cp -v {} release_assets/ \;
           find artifacts -name 'AutoCulling_*.exe' -exec cp -v {} release_assets/ \;
           find artifacts -name 'AutoCulling_*.zip' -exec cp -v {} release_assets/ \;
-          # CLI onefile binaries (lowercase naming) — their .sha256 are staged
-          # by the glob below, so the binaries themselves must be staged too.
-          find artifacts -name 'auto_cull_v*_win_x64.exe' -exec cp -v {} release_assets/ \;
-          find artifacts -name 'auto_cull_v*_macos_arm64' -type f -exec cp -v {} release_assets/ \;
           find artifacts -name '*.sha256' -exec cp -v {} release_assets/ \;
           echo "Staged release assets:"; ls -lh release_assets/; cat release_assets/*.sha256 2>/dev/null || true
       - name: Derive tag + what changed vs last release
