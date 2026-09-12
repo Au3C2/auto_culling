@@ -90,6 +90,9 @@ a = Analysis(
 pyz = PYZ(a.pure, a.zipped_data, cipher=None)
 
 if onedir:
+    # Two entry points sharing ONE _internal tree (zero duplicated deps):
+    #   - cull_sidecar     : windowed bootloader — spawned by Tauri (no console flash)
+    #   - auto_culling_cli : console bootloader — user-facing CLI (stdout to terminal)
     exe = EXE(
         pyz,
         a.scripts,
@@ -109,8 +112,28 @@ if onedir:
         codesign_identity=None,
         entitlements_file=None,
     )
+    cli_exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name="auto_culling_cli",
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        upx_exclude=[],
+        runtime_tmpdir=None,
+        console=True,  # Console subsystem so CLI stdout attaches to the terminal
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+    )
     coll = COLLECT(
         exe,
+        cli_exe,
         a.binaries,
         a.zipfiles,
         a.datas,

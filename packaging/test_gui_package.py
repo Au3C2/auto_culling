@@ -127,12 +127,16 @@ def test_macos_dmg(dmg_path: Path | None = None) -> bool:
             print("FAIL: DMG missing .DS_Store — icon/window layout not applied.")
             success = False
 
-        # Test sidecar executable if bundled in Resources or MacOS
+        # Test sidecar executable if bundled in Resources or MacOS.
+        # 2026-09-12 layout: resources map to Contents/Resources/sidecar/ and
+        # the sidecar onedir carries TWO entry points sharing one _internal:
+        #   cull_sidecar     (windowed, spawned by the GUI)
+        #   auto_culling_cli (console, user-facing CLI)
         sidecar_cand = None
-        for cand in [res_dir / "resources/sidecar/cull_sidecar",
-                     res_dir / "resources/sidecar/cull_sidecar.exe",
-                     res_dir / "cull-sidecar", res_dir / "cull_sidecar",
-                     macos_dir / "cull-sidecar", macos_dir / "cull_sidecar"]:
+        for cand in [res_dir / "sidecar/cull_sidecar",
+                     res_dir / "sidecar/cull_sidecar.exe",
+                     res_dir / "cull_sidecar",
+                     macos_dir / "cull_sidecar"]:
             if cand.exists():
                 sidecar_cand = cand
                 break
@@ -146,6 +150,31 @@ def test_macos_dmg(dmg_path: Path | None = None) -> bool:
             success = False
         else:
             print("NOTE: Sidecar is bundled as external binary or dev-resolved.")
+
+        # 5. The console CLI entry point must ship next to the sidecar engine
+        #    and respond on stdout (console-subsystem bootloader sanity).
+        if sidecar_cand:
+            cli_name = "auto_culling_cli.exe" if platform.system() == "Windows" else "auto_culling_cli"
+            cli_bin = sidecar_cand.parent / cli_name
+            if cli_bin.exists():
+                try:
+                    help_res = subprocess.run(
+                        [str(cli_bin), "--help"],
+                        capture_output=True, text=True, timeout=60,
+                        stdin=subprocess.DEVNULL,
+                    )
+                    if help_res.returncode == 0 and "usage" in (help_res.stdout or "").lower():
+                        print(f"PASS: CLI entry point {cli_name} responds on stdout (--help).")
+                    else:
+                        print(f"FAIL: CLI entry point --help rc={help_res.returncode} "
+                              f"stdout={(help_res.stdout or '')[:120]!r} stderr={(help_res.stderr or '')[:200]!r}")
+                        success = False
+                except Exception as e:
+                    print(f"FAIL: CLI entry point --help raised: {e}")
+                    success = False
+            else:
+                print(f"FAIL: CLI entry point {cli_name} missing next to sidecar.")
+                success = False
 
         if sidecar_cand:
             print(f"Testing bundled sidecar: {sidecar_cand}")
@@ -238,7 +267,7 @@ def test_macos_dmg(dmg_path: Path | None = None) -> bool:
             for i in range(3):
                 shutil.copy2(seed, heif_dir / f"guard_{i:02d}.heif")
 
-            engine_bin = install_dir / app_bundle.name / "Contents" / "Resources" / "resources" / "sidecar" / "cull_sidecar" / "cull_sidecar"
+            engine_bin = install_dir / app_bundle.name / "Contents" / "Resources" / "sidecar" / "cull_sidecar"
             if not engine_bin.exists():
                 engine_bin = sidecar_cand or engine_bin
 
@@ -385,6 +414,23 @@ def test_windows_package(dist_dir: Path | None = None) -> bool:
                     success = False
             else:
                 print("WARNING: Portable ZIP missing cull_sidecar.exe")
+
+            # GUI executable must be named auto_culling.exe (productName stays
+            # AutoCulling for installer/shortcut display).
+            gui_exes = list(unzip_dir.glob("auto_culling.exe"))
+            if gui_exes:
+                print("PASS: Portable ZIP GUI executable is auto_culling.exe at archive root.")
+            else:
+                print("FAIL: Portable ZIP missing auto_culling.exe at archive root.")
+                success = False
+
+            # CLI entry point must ship next to the sidecar engine
+            cli_exes = list(unzip_dir.glob("**/auto_culling_cli.exe"))
+            if cli_exes:
+                print(f"PASS: Portable ZIP carries CLI entry point at {cli_exes[0].relative_to(unzip_dir)}")
+            else:
+                print("FAIL: Portable ZIP missing auto_culling_cli.exe.")
+                success = False
         except Exception as e:
             print(f"FAIL: Error testing portable ZIP: {e}")
             success = False
@@ -412,15 +458,15 @@ def test_windows_package(dist_dir: Path | None = None) -> bool:
 
             # Wait for asynchronous file writing if needed
             deadline = time.time() + 30.0
-            app_exe = sandbox_install / "AutoCulling.exe"
+            app_exe = sandbox_install / "auto_culling.exe"
             while time.time() < deadline and not app_exe.exists():
                 time.sleep(0.5)
 
             if not app_exe.exists():
-                print(f"FAIL: AutoCulling.exe not found in install dir: {sandbox_install}")
+                print(f"FAIL: auto_culling.exe not found in install dir: {sandbox_install}")
                 success = False
             else:
-                print(f"PASS: AutoCulling.exe installed successfully ({app_exe.stat().st_size / 1024 / 1024:.1f} MB).")
+                print(f"PASS: auto_culling.exe installed successfully ({app_exe.stat().st_size / 1024 / 1024:.1f} MB).")
 
             # Check uninstaller existence
             uninstaller = sandbox_install / "Uninstall.exe"
@@ -443,9 +489,31 @@ def test_windows_package(dist_dir: Path | None = None) -> bool:
                 print(f"FAIL: Installed directory does not contain cull_sidecar.exe")
                 success = False
 
+            # Installed CLI entry point must respond on stdout (console subsystem)
+            installed_cli = list(sandbox_install.glob("**/auto_culling_cli.exe"))
+            if installed_cli:
+                try:
+                    help_res = subprocess.run(
+                        [str(installed_cli[0]), "--help"],
+                        capture_output=True, text=True, timeout=60,
+                        stdin=subprocess.DEVNULL,
+                    )
+                    if help_res.returncode == 0 and "usage" in (help_res.stdout or "").lower():
+                        print(f"PASS: Installed auto_culling_cli.exe responds on stdout (--help).")
+                    else:
+                        print(f"FAIL: Installed CLI --help rc={help_res.returncode} "
+                              f"stdout={(help_res.stdout or '')[:120]!r} stderr={(help_res.stderr or '')[:200]!r}")
+                        success = False
+                except Exception as e:
+                    print(f"FAIL: Installed CLI --help raised: {e}")
+                    success = False
+            else:
+                print("FAIL: Installed directory does not contain auto_culling_cli.exe")
+                success = False
+
             # 3. Test installed app launch and sidecar handshake
             if app_exe.exists():
-                print("\nTesting installed AutoCulling.exe launch and sidecar handshake...")
+                print("\nTesting installed auto_culling.exe launch and sidecar handshake...")
                 app_proc = subprocess.Popen(
                     [str(app_exe)],
                     stdout=subprocess.DEVNULL,

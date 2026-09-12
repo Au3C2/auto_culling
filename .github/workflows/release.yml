@@ -73,25 +73,15 @@ jobs:
             --seed-dir tests/ci/sample --count 120 --samples 2 \
             --tolerance 0.75 --baseline-file tests/ci/ci_config.json \
             --no-prewarm --json build/ci_source.json
-      - name: Build onedir (zip) + Desktop GUI (DMG)
+      - name: Build Desktop GUI (DMG)
         run: |
           VER="${{ steps.ver.outputs.ver }}"
-          echo "Building onedir v$VER ..."
-          .venv/bin/python packaging/build.py --onedir
-          ls -lh "dist/auto_cull_v${VER}_macos_arm64/auto_cull_v${VER}_macos_arm64"
-          ONEDIR="dist/auto_cull_v${VER}_macos_arm64"
-          (cd dist && zip -r -q "auto_cull_v${VER}_macos_arm64_onedir.zip" "auto_cull_v${VER}_macos_arm64")
-          ls -lh "dist/auto_cull_v${VER}_macos_arm64_onedir.zip"
-
           echo "Building Desktop GUI DMG Installer v$VER ..."
           .venv/bin/python packaging/build_gui.py
           ls -lh dist/AutoCulling_*.dmg || true
-      - name: SHA256
-        run: |
-          VER="${{ steps.ver.outputs.ver }}"
-          ONEDIR_ZIP="dist/auto_cull_v${VER}_macos_arm64_onedir.zip"
-          (cd dist && shasum -a 256 "$(basename "$ONEDIR_ZIP")" | tee "$(basename "$ONEDIR_ZIP").sha256")
-          cat "dist/$(basename "$ONEDIR_ZIP").sha256"
+      # No standalone SHA256 step: build_gui.py emits .sha256 for every
+      # collected release artifact (DMG). The onedir dir from the Precision
+      # gate step stays in dist/ purely as the warm-start smoke fixture.
       - name: Smoke — warm-start perf (packaged binary)
         timeout-minutes: 25
         run: |
@@ -108,7 +98,6 @@ jobs:
           name: macos-v${{ steps.ver.outputs.ver }}
           if-no-files-found: error
           path: |
-            dist/auto_cull_v${{ steps.ver.outputs.ver }}_macos_arm64_onedir.zip
             dist/AutoCulling_*.dmg*
             dist/*.sha256
             build/ci_*.json
@@ -164,27 +153,17 @@ jobs:
             --seed-dir tests/ci/sample --count 120 --samples 2 --tolerance 0.65 `
             --baseline-file tests/ci/ci_config.json --no-prewarm `
             --json build/ci_source.json
-      - name: Build onedir (zip) + Desktop GUI (Setup + Portable)
+      - name: Build Desktop GUI (Setup + Portable)
         shell: bash
         run: |
           VER="${{ steps.ver.outputs.ver }}"
-          echo "Building onedir v$VER ..."
-          .venv/Scripts/python.exe packaging/build.py --onedir
-          ls -lh "dist/auto_cull_v${VER}_win_x64/auto_cull_v${VER}_win_x64.exe"
-          ONEDIR="dist/auto_cull_v${VER}_win_x64"
-          powershell -NoProfile -Command "Compress-Archive -Path '$ONEDIR' -DestinationPath 'dist/auto_cull_v${VER}_win_x64_onedir.zip' -Force"
-          ls -lh "dist/auto_cull_v${VER}_win_x64_onedir.zip"
-
           echo "Building Windows Desktop GUI Packages v$VER ..."
           .venv/Scripts/python.exe packaging/build_gui.py
           ls -lh dist/AutoCulling_* || true
-      - name: SHA256
-        shell: bash
-        run: |
-          VER="${{ steps.ver.outputs.ver }}"
-          ONEDIR_ZIP="dist/auto_cull_v${VER}_win_x64_onedir.zip"
-          (cd dist && sha256sum "$(basename "$ONEDIR_ZIP")" 2>/dev/null | tee "$(basename "$ONEDIR_ZIP").sha256") || (powershell -NoProfile -Command "Set-Location dist; Get-FileHash -Algorithm SHA256 '$(basename "$ONEDIR_ZIP")' | ForEach-Object { \"\$(\$_.Hash.ToLower())  $(basename "$ONEDIR_ZIP")\" } | Tee-Object -FilePath \"$(basename "$ONEDIR_ZIP").sha256")
-          cat "dist/$(basename "$ONEDIR_ZIP").sha256"
+      # No standalone SHA256 step: build_gui.py emits .sha256 for every
+      # collected release artifact (setup.exe + portable.zip). The onedir dir
+      # from the Precision gate step stays in dist/ purely as the warm-start
+      # smoke fixture.
       - name: Smoke — warm-start perf (packaged binary)
         timeout-minutes: 25
         run: |
@@ -202,7 +181,6 @@ jobs:
           name: windows-v${{ steps.ver.outputs.ver }}
           if-no-files-found: error
           path: |
-            dist/auto_cull_v${{ steps.ver.outputs.ver }}_win_x64_onedir.zip
             dist/AutoCulling_*.exe*
             dist/AutoCulling_*.zip*
             dist/*.sha256
@@ -220,10 +198,9 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Stage release assets (onedir + GUI packages)
+      - name: Stage release assets (GUI packages; CLI bundled inside)
         run: |
           mkdir -p release_assets
-          find artifacts -name '*_onedir.zip' -exec cp -v {} release_assets/ \;
           find artifacts -name 'AutoCulling_*.dmg' -exec cp -v {} release_assets/ \;
           find artifacts -name 'AutoCulling_*.exe' -exec cp -v {} release_assets/ \;
           find artifacts -name 'AutoCulling_*.zip' -exec cp -v {} release_assets/ \;
@@ -275,7 +252,7 @@ jobs:
             Automated culling for F1 & motorsport burst photography.
             Previous release: `${{ steps.tag.outputs.prev }}` → `${{ steps.tag.outputs.tag }}` · [full diff](https://github.com/${{ github.repository }}/compare/${{ steps.tag.outputs.prev }}...${{ steps.tag.outputs.tag }})
 
-            ### Download — Desktop GUI (Recommended)
+            ### Download — Desktop GUI + bundled CLI (Recommended)
 
             | Platform | Format | Package |
             | --- | --- | --- |
@@ -283,23 +260,21 @@ jobs:
             | Windows x64 | Portable (No install required) | `AutoCulling_v*_win_x64_portable.zip` |
             | macOS Apple Silicon | DMG Drag-to-Install | `AutoCulling_v*_macos_arm64.dmg` |
 
-            ### Download — CLI Onedir (Headless / Benchmarks / Automation)
+            GUI executable: `auto_culling(.exe)`. CLI is bundled inside every
+            package (same engine, console entry point):
+            - Windows: `<install dir>\sidecar\auto_culling_cli.exe`
+            - macOS:   `AutoCulling.app/Contents/Resources/sidecar/auto_culling_cli`
 
-            | Platform | Onedir |
-            | --- | --- |
-            | macOS Apple Silicon | `auto_cull_v*-macos_arm64_onedir.zip` |
-            | Windows x64 | `auto_cull_v*-win_x64_onedir.zip` |
-
-            Each zip ships with a `.sha256` — verify with `shasum -a 256 <file>` / `Get-FileHash -Algorithm SHA256`. Unzip and run the binary inside.
+            Each package ships with a `.sha256` — verify with `shasum -a 256 <file>` / `Get-FileHash -Algorithm SHA256`.
 
             ```powershell
-            # Windows — unzip first
-            Expand-Archive auto_cull_v*-win_x64_onedir.zip; .\auto_cull_v*-win_x64\auto_cull_v*-win_x64.exe --input-dir C:\Photos\F1 --recursive --force
+            # Windows — CLI batch culling (portable unzip or default install dir)
+            .\sidecar\auto_culling_cli.exe --input-dir C:\Photos\F1 --recursive --force
             ```
 
             ```bash
-            # macOS — unzip first
-            unzip auto_cull_v*-macos_arm64_onedir.zip && ./auto_cull_v*-macos_arm64/auto_cull_v*-macos_arm64 --input-dir /path/to/photos --recursive --force
+            # macOS — CLI batch culling
+            /Applications/AutoCulling.app/Contents/Resources/sidecar/auto_culling_cli --input-dir /path/to/photos --recursive --force
             ```
 
             Omit `--input-dir` to open a folder picker. `--force` re-analyzes already-rated files.

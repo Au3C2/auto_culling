@@ -92,6 +92,12 @@ def build_sidecar_binary() -> Path:
     sidecar_bin = sidecar_dir / ("cull_sidecar.exe" if sys.platform == "win32" else "cull_sidecar")
     if not sidecar_bin.exists():
         raise FileNotFoundError(f"Expected onedir sidecar binary at {sidecar_bin}")
+    # The spec builds TWO entry points sharing one _internal: the windowed
+    # cull_sidecar (spawned by Tauri) and the console auto_culling_cli
+    # (user-facing CLI). Both must exist or the release is incomplete.
+    cli_bin = sidecar_dir / ("auto_culling_cli.exe" if sys.platform == "win32" else "auto_culling_cli")
+    if not cli_bin.exists():
+        raise FileNotFoundError(f"Expected onedir CLI entry point at {cli_bin}")
 
     print(f"PASS: Compiled onedir sidecar: {sidecar_dir} ({sum(f.stat().st_size for f in sidecar_dir.rglob('*') if f.is_file()) / 1024 / 1024:.1f} MB)")
 
@@ -101,6 +107,7 @@ def build_sidecar_binary() -> Path:
     shutil.copytree(sidecar_dir, res_dir)
     if sys.platform != "win32":
         os.chmod(sidecar_bin, 0o755)
+        os.chmod(cli_bin, 0o755)
 
     print(f"PASS: Staged sidecar onedir to {res_dir}")
     return sidecar_bin
@@ -223,13 +230,22 @@ def organize_dist_artifacts() -> list[Path]:
 
         # 2. Portable ZIP — app exe + onedir sidecar resources so the
         #    green build resolves the sidecar exactly like the NSIS install.
-        release_exe = SRC_TAURI / "target/release/AutoCulling.exe"
+        #    Layout mirrors the NSIS target mapping ("resources/sidecar" ->
+        #    "sidecar"): auto_culling.exe + WebView2Loader.dll at root,
+        #    engine onedir (cull_sidecar + auto_culling_cli + _internal)
+        #    under sidecar/.
+        release_exe = None
+        for cand in (SRC_TAURI / "target/release/auto_culling.exe",
+                     SRC_TAURI / "target/release/AutoCulling.exe"):
+            if cand.exists():
+                release_exe = cand
+                break
         sidecar_stage = SRC_TAURI / "resources/sidecar"
-        if release_exe.exists() and sidecar_stage.exists():
+        if release_exe is not None and sidecar_stage.exists():
             portable_zip = dist_dir / f"AutoCulling_v{ver}_win_x64_portable.zip"
             with zipfile.ZipFile(portable_zip, "w", zipfile.ZIP_DEFLATED) as z:
-                z.write(release_exe, "AutoCulling.exe")
-                # Ensure WebView2Loader.dll sits next to AutoCulling.exe
+                z.write(release_exe, "auto_culling.exe")
+                # Ensure WebView2Loader.dll sits next to auto_culling.exe
                 wv2_candidates = [
                     SRC_TAURI / "target/release/WebView2Loader.dll",
                     SRC_TAURI / "resources/WebView2Loader.dll",
@@ -240,7 +256,7 @@ def organize_dist_artifacts() -> list[Path]:
                         break
                 for f in sorted(sidecar_stage.rglob("*")):
                     if f.is_file():
-                        z.write(f, str(f.relative_to(SRC_TAURI)))
+                        z.write(f, str(Path("sidecar") / f.relative_to(sidecar_stage)))
             print(f"Output Portable ZIP: {portable_zip} ({portable_zip.stat().st_size / 1024 / 1024:.1f} MB)")
             collected_artifacts.append(portable_zip)
 
