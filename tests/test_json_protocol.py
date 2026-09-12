@@ -1,4 +1,4 @@
-"""Protocol test suite for the resident JSON Lines sidecar interface.
+"""Protocol test suite for the resident JSON Lines engine interface.
 
 Tests scan, run with parameter overrides, cancellation mid-flight,
 preview generation with bounding boxes, and error reporting.
@@ -15,8 +15,8 @@ from pathlib import Path
 import pytest
 
 
-class SidecarChannel:
-    """Helper to manage communication with a resident cull_photos sidecar subprocess."""
+class EngineChannel:
+    """Helper to manage communication with a resident cull_photos engine subprocess."""
 
     def __init__(self, proc: subprocess.Popen[str]):
         self.proc = proc
@@ -41,7 +41,7 @@ class SidecarChannel:
 
     def send(self, cmd: dict) -> None:
         if self.proc.stdin is None:
-            raise RuntimeError("Sidecar stdin not available")
+            raise RuntimeError("Engine stdin not available")
         payload = json.dumps(cmd) + "\n"
         self.proc.stdin.write(payload)
         self.proc.stdin.flush()
@@ -73,7 +73,7 @@ class SidecarChannel:
 
 
 @pytest.fixture
-def sidecar_process():
+def engine_process():
     cmd = [sys.executable, "-u", "cull_photos.py", "--json-lines"]
     proc = subprocess.Popen(
         cmd,
@@ -83,36 +83,36 @@ def sidecar_process():
         text=True,
         bufsize=1,
     )
-    channel = SidecarChannel(proc)
+    channel = EngineChannel(proc)
     # Wait for process initialization
     time.sleep(0.3)
     yield channel
     channel.close()
 
 
-def test_json_lines_scan_before_run(sidecar_process: SidecarChannel, tmp_path: Path):
+def test_json_lines_scan_before_run(engine_process: EngineChannel, tmp_path: Path):
     """Test scanning a directory before starting scoring."""
     img_dir = Path("tests/test_img")
     if not img_dir.exists():
         pytest.skip("tests/test_img does not exist")
 
-    sidecar_process.clear()
-    sidecar_process.send({"cmd": "scan", "dir": str(img_dir), "recursive": False})
-    scanned_evt = sidecar_process.wait_for_event("scanned", timeout=10.0)
+    engine_process.clear()
+    engine_process.send({"cmd": "scan", "dir": str(img_dir), "recursive": False})
+    scanned_evt = engine_process.wait_for_event("scanned", timeout=10.0)
     assert scanned_evt is not None
     assert "count" in scanned_evt
     assert scanned_evt["count"] > 0
     assert "paths" in scanned_evt
 
 
-def test_json_lines_run_and_frame_events(sidecar_process: SidecarChannel):
+def test_json_lines_run_and_frame_events(engine_process: EngineChannel):
     """Test running culling and receiving frame scoring events."""
     img_dir = Path("tests/test_img")
     if not img_dir.exists():
         pytest.skip("tests/test_img does not exist")
 
-    sidecar_process.clear()
-    sidecar_process.send({
+    engine_process.clear()
+    engine_process.send({
         "cmd": "run",
         "dir": str(img_dir),
         "config": {
@@ -123,13 +123,13 @@ def test_json_lines_run_and_frame_events(sidecar_process: SidecarChannel):
         }
     })
 
-    done_evt = sidecar_process.wait_for_event("done", timeout=30.0)
+    done_evt = engine_process.wait_for_event("done", timeout=30.0)
     assert done_evt is not None
     assert "total" in done_evt
     assert "keep" in done_evt
     assert "reject" in done_evt
 
-    frame_events = sidecar_process.get_events_by_type("frame")
+    frame_events = engine_process.get_events_by_type("frame")
     assert len(frame_events) > 0
     first_frame = frame_events[0]
     assert "name" in first_frame
@@ -140,53 +140,53 @@ def test_json_lines_run_and_frame_events(sidecar_process: SidecarChannel):
     assert "status" in first_frame
 
 
-def test_json_lines_preview_request(sidecar_process: SidecarChannel):
+def test_json_lines_preview_request(engine_process: EngineChannel):
     """Test requesting image preview with bounding boxes."""
     img_dir = Path("tests/test_img")
     if not img_dir.exists():
         pytest.skip("tests/test_img does not exist")
 
     # Run quick dry run first so boxes/scores exist
-    sidecar_process.send({
+    engine_process.send({
         "cmd": "run",
         "dir": str(img_dir),
         "config": {"dry_run": True}
     })
-    done_evt = sidecar_process.wait_for_event("done", timeout=30.0)
+    done_evt = engine_process.wait_for_event("done", timeout=30.0)
     assert done_evt is not None
 
-    frame_events = sidecar_process.get_events_by_type("frame")
+    frame_events = engine_process.get_events_by_type("frame")
     assert len(frame_events) > 0
     test_img_path = str(img_dir / frame_events[0]["name"])
 
-    sidecar_process.clear()
-    sidecar_process.send({
+    engine_process.clear()
+    engine_process.send({
         "cmd": "preview",
         "path": test_img_path,
         "size": 320
     })
 
-    preview_evt = sidecar_process.wait_for_event("preview", timeout=10.0)
+    preview_evt = engine_process.wait_for_event("preview", timeout=10.0)
     assert preview_evt is not None
     assert preview_evt.get("path") == test_img_path
     assert "data" in preview_evt
     assert len(preview_evt["data"]) > 100  # Base64 string
 
 
-def test_json_lines_cancel(sidecar_process: SidecarChannel):
+def test_json_lines_cancel(engine_process: EngineChannel):
     """Test immediate cancellation during run."""
     img_dir = Path("tests/test_img")
     if not img_dir.exists():
         pytest.skip("tests/test_img does not exist")
 
-    sidecar_process.clear()
-    sidecar_process.send({
+    engine_process.clear()
+    engine_process.send({
         "cmd": "run",
         "dir": str(img_dir),
         "config": {"dry_run": True}
     })
     time.sleep(0.1)
-    sidecar_process.send({"cmd": "cancel"})
+    engine_process.send({"cmd": "cancel"})
 
-    cancel_or_done = sidecar_process.wait_for_event("cancelled", timeout=10.0) or sidecar_process.wait_for_event("done", timeout=10.0)
+    cancel_or_done = engine_process.wait_for_event("cancelled", timeout=10.0) or engine_process.wait_for_event("done", timeout=10.0)
     assert cancel_or_done is not None

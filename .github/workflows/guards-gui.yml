@@ -4,8 +4,8 @@ name: gui-guards
 # Runs on push to develop/master/feature/tauri-gui and pull requests.
 #
 # Platforms:
-# - macOS (Apple Silicon macos-14): Builds DMG, mounts volume, tests app & sidecar.
-# - Windows (windows-latest): Builds NSIS setup .exe + portable .zip, tests extraction & sidecar.
+# - macOS (Apple Silicon macos-14): Builds DMG, mounts volume, tests app & engine.
+# - Windows (windows-latest): Builds NSIS setup .exe + portable .zip, tests extraction & engine.
 
 on:
   push:

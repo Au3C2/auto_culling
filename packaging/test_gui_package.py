@@ -1,9 +1,9 @@
 """packaging/test_gui_package.py — automated test suite for packaged GUI installers.
 
 Validates:
-1. macOS: Mounts .dmg, verifies .app bundle integrity and embedded sidecar execution.
+1. macOS: Mounts .dmg, verifies .app bundle integrity and embedded engine execution.
 2. Windows: Verifies NSIS setup .exe and extracts/validates portable .zip bundle.
-3. Tests communication handshake with the bundled sidecar binary (scan & preview).
+3. Tests communication handshake with the bundled engine binary (scan & preview).
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ def _detach_stale_attachments(dmg_path: Path) -> None:
 
 
 def test_macos_dmg(dmg_path: Path | None = None) -> bool:
-    """Mount macOS DMG, verify .app structure, test embedded sidecar and unmount."""
+    """Mount macOS DMG, verify .app structure, test embedded engine and unmount."""
     print("=== Testing macOS DMG Installer Package ===")
     if not dmg_path or not dmg_path.exists():
         # Search dist/ or src-tauri/target/release/bundle/dmg/ — prefer release
@@ -95,7 +95,7 @@ def test_macos_dmg(dmg_path: Path | None = None) -> bool:
         macos_dir = app_bundle / "Contents" / "MacOS"
         res_dir = app_bundle / "Contents" / "Resources"
 
-        main_execs = [e for e in macos_dir.glob("*") if e.name != "cull-sidecar"]
+        main_execs = [e for e in macos_dir.glob("*") if e.name != "auto_culling_engine"]
         if not main_execs:
             print("FAIL: Missing executable in Contents/MacOS/")
             return False
@@ -127,35 +127,36 @@ def test_macos_dmg(dmg_path: Path | None = None) -> bool:
             print("FAIL: DMG missing .DS_Store — icon/window layout not applied.")
             success = False
 
-        # Test sidecar executable if bundled in Resources or MacOS.
-        # 2026-09-12 layout: resources map to Contents/Resources/sidecar/ and
-        # the sidecar onedir carries TWO entry points sharing one _internal:
-        #   cull_sidecar     (windowed, spawned by the GUI)
-        #   auto_culling_cli (console, user-facing CLI)
-        sidecar_cand = None
-        for cand in [res_dir / "sidecar/cull_sidecar",
-                     res_dir / "sidecar/cull_sidecar.exe",
-                     res_dir / "cull_sidecar",
-                     macos_dir / "cull_sidecar"]:
+        # Test engine executable if bundled in Resources or MacOS.
+        # 2026-09-12 flat layout: resources map to the Contents/Resources
+        # ROOT and the engine onedir carries TWO entry points sharing one
+        # lib/ dependency tree:
+        #   auto_culling_engine (windowed, spawned by the GUI)
+        #   auto_culling_cli    (console, user-facing CLI)
+        engine_cand = None
+        for cand in [res_dir / "auto_culling_engine",
+                     res_dir / "auto_culling_engine.exe",
+                     
+                     macos_dir / "auto_culling_engine"]:
             if cand.exists():
-                sidecar_cand = cand
+                engine_cand = cand
                 break
 
-        # 4. Sidecar must ship as ONEDIR (binary + _internal). The onefile form
+        # 4. Engine must ship as ONEDIR (binary + lib/). The onefile form
         # re-extracts 160 MB per launch (15-25 s startup tax on macOS).
-        if sidecar_cand and (sidecar_cand.parent / "_internal").is_dir():
-            print("PASS: Sidecar ships as onedir (no per-launch extraction tax).")
-        elif sidecar_cand:
-            print("FAIL: Sidecar shipped as onefile — 15-25s startup tax per launch.")
+        if engine_cand and (engine_cand.parent / "lib").is_dir():
+            print("PASS: Engine ships as onedir (no per-launch extraction tax).")
+        elif engine_cand:
+            print("FAIL: Engine shipped as onefile — 15-25s startup tax per launch.")
             success = False
         else:
-            print("NOTE: Sidecar is bundled as external binary or dev-resolved.")
+            print("NOTE: Engine is bundled as external binary or dev-resolved.")
 
-        # 5. The console CLI entry point must ship next to the sidecar engine
+        # 5. The console CLI entry point must ship at the bundle root (flat layout)
         #    and respond on stdout (console-subsystem bootloader sanity).
-        if sidecar_cand:
+        if engine_cand:
             cli_name = "auto_culling_cli.exe" if platform.system() == "Windows" else "auto_culling_cli"
-            cli_bin = sidecar_cand.parent / cli_name
+            cli_bin = engine_cand.parent / cli_name
             if cli_bin.exists():
                 try:
                     help_res = subprocess.run(
@@ -173,13 +174,13 @@ def test_macos_dmg(dmg_path: Path | None = None) -> bool:
                     print(f"FAIL: CLI entry point --help raised: {e}")
                     success = False
             else:
-                print(f"FAIL: CLI entry point {cli_name} missing next to sidecar.")
+                print(f"FAIL: CLI entry point {cli_name} missing at bundle root.")
                 success = False
 
-        if sidecar_cand:
-            print(f"Testing bundled sidecar: {sidecar_cand}")
-            sidecar_proc = subprocess.Popen(
-                [str(sidecar_cand), "--json-lines"],
+        if engine_cand:
+            print(f"Testing bundled engine: {engine_cand}")
+            engine_proc = subprocess.Popen(
+                [str(engine_cand), "--json-lines"],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -190,21 +191,21 @@ def test_macos_dmg(dmg_path: Path | None = None) -> bool:
             # Send test scan
             test_dir = ROOT / "tests/test_img"
             if test_dir.exists():
-                sidecar_proc.stdin.write(json.dumps({"cmd": "scan", "dir": str(test_dir), "recursive": False}) + "\n")
-                sidecar_proc.stdin.flush()
-                scan_line = sidecar_proc.stdout.readline()
-                print(f"Sidecar handshake output: {scan_line.strip()[:100]}")
-            sidecar_proc.stdin.write(json.dumps({"cmd": "quit"}) + "\n")
-            sidecar_proc.stdin.flush()
-            sidecar_proc.wait(timeout=5.0)
-            print("PASS: Packaged sidecar passed Stdio JSON Lines handshake test.")
+                engine_proc.stdin.write(json.dumps({"cmd": "scan", "dir": str(test_dir), "recursive": False}) + "\n")
+                engine_proc.stdin.flush()
+                scan_line = engine_proc.stdout.readline()
+                print(f"Engine handshake output: {scan_line.strip()[:100]}")
+            engine_proc.stdin.write(json.dumps({"cmd": "quit"}) + "\n")
+            engine_proc.stdin.flush()
+            engine_proc.wait(timeout=5.0)
+            print("PASS: Packaged engine passed Stdio JSON Lines handshake test.")
         else:
-            print("NOTE: Sidecar is bundled as external binary or dev-resolved.")
+            print("NOTE: Engine is bundled as external binary or dev-resolved.")
 
         # Regression test for the installed-app flow: the .app must spawn the
-        # bundled sidecar itself (eagerly at startup). A broken resolution here
+        # bundled engine itself (eagerly at startup). A broken resolution here
         # used to surface as "Broken pipe (os error 32)" on folder pick.
-        print("Testing .app self-spawn of bundled sidecar (installed-app simulation)...")
+        print("Testing .app self-spawn of bundled engine (installed-app simulation)...")
         install_dir = Path("/tmp/AutoCulling_AppInstall")
         shutil.rmtree(install_dir, ignore_errors=True)
         install_dir.mkdir(parents=True)
@@ -217,29 +218,29 @@ def test_macos_dmg(dmg_path: Path | None = None) -> bool:
             cwd=str(install_dir),
         )
         try:
-            sidecar_alive = False
+            engine_alive = False
             deadline = time.time() + 40.0
             gui_log = app_bin.parent / "gui.log"
             while time.time() < deadline:
                 probe = subprocess.run(
-                    ["pgrep", "-f", "cull_sidecar"],
+                    ["pgrep", "-f", "auto_culling_engine"],
                     capture_output=True, text=True,
                 )
                 if probe.returncode == 0 and probe.stdout.strip():
-                    sidecar_alive = True
+                    engine_alive = True
                     break
-                # The app logs "sidecar spawned and alive" next to its binary
-                if gui_log.exists() and "sidecar spawned and alive" in gui_log.read_text(errors="ignore"):
-                    sidecar_alive = True
+                # The app logs "engine spawned and alive" next to its binary
+                if gui_log.exists() and "engine spawned and alive" in gui_log.read_text(errors="ignore"):
+                    engine_alive = True
                     break
                 if app_proc.poll() is not None:
                     break
                 time.sleep(0.5)
-            if sidecar_alive:
-                print("PASS: Installed .app spawned the bundled sidecar at startup.")
+            if engine_alive:
+                print("PASS: Installed .app spawned the bundled engine at startup.")
             else:
                 tail = gui_log.read_text(errors="ignore")[-500:] if gui_log.exists() else "(no gui.log)"
-                print(f"FAIL: .app did not spawn the bundled sidecar. gui.log tail:\n{tail}")
+                print(f"FAIL: .app did not spawn the bundled engine. gui.log tail:\n{tail}")
                 success = False
         finally:
             app_proc.terminate()
@@ -247,7 +248,7 @@ def test_macos_dmg(dmg_path: Path | None = None) -> bool:
                 app_proc.wait(timeout=5.0)
             except Exception:
                 app_proc.kill()
-            subprocess.run(["pkill", "-f", "cull_sidecar"], capture_output=True)
+            subprocess.run(["pkill", "-f", "auto_culling_engine"], capture_output=True)
             shutil.rmtree(install_dir, ignore_errors=True)
 
         # 5. HEIF frozen-engine guard: packaged GUI apps run with a minimal
@@ -267,9 +268,9 @@ def test_macos_dmg(dmg_path: Path | None = None) -> bool:
             for i in range(3):
                 shutil.copy2(seed, heif_dir / f"guard_{i:02d}.heif")
 
-            engine_bin = install_dir / app_bundle.name / "Contents" / "Resources" / "sidecar" / "cull_sidecar"
+            engine_bin = install_dir / app_bundle.name / "Contents" / "Resources" / "auto_culling_engine"
             if not engine_bin.exists():
-                engine_bin = sidecar_cand or engine_bin
+                engine_bin = engine_cand or engine_bin
 
             def run_engine(cmd_prefix, path_env):
                 env = dict(os.environ)
@@ -381,7 +382,7 @@ def test_windows_package(dist_dir: Path | None = None) -> bool:
         return False
 
     success = True
-    tested_sidecar_bin: Path | None = None
+    tested_engine_bin: Path | None = None
 
     # 1. Test Portable ZIP Package
     if zips:
@@ -401,19 +402,19 @@ def test_windows_package(dist_dir: Path | None = None) -> bool:
                 print("FAIL: No .exe found inside portable ZIP.")
                 success = False
 
-            # Check onedir sidecar inside portable ZIP
-            sidecars = list(unzip_dir.glob("**/cull_sidecar.exe"))
-            if sidecars:
-                cand = sidecars[0]
-                if (cand.parent / "_internal").is_dir():
-                    print(f"PASS: Portable ZIP carries onedir sidecar at {cand.relative_to(unzip_dir)}")
-                    if tested_sidecar_bin is None:
-                        tested_sidecar_bin = cand
+            # Check onedir engine inside portable ZIP
+            engine_bins = list(unzip_dir.glob("**/auto_culling_engine.exe"))
+            if engine_bins:
+                cand = engine_bins[0]
+                if (cand.parent / "lib").is_dir():
+                    print(f"PASS: Portable ZIP carries onedir engine at {cand.relative_to(unzip_dir)}")
+                    if tested_engine_bin is None:
+                        tested_engine_bin = cand
                 else:
-                    print("FAIL: Portable ZIP sidecar is not onedir format (missing _internal/)")
+                    print("FAIL: Portable ZIP engine is not onedir format (missing lib/)")
                     success = False
             else:
-                print("WARNING: Portable ZIP missing cull_sidecar.exe")
+                print("WARNING: Portable ZIP missing auto_culling_engine.exe")
 
             # GUI executable must be named auto_culling.exe (productName stays
             # AutoCulling for installer/shortcut display).
@@ -424,8 +425,8 @@ def test_windows_package(dist_dir: Path | None = None) -> bool:
                 print("FAIL: Portable ZIP missing auto_culling.exe at archive root.")
                 success = False
 
-            # CLI entry point must ship next to the sidecar engine
-            cli_exes = list(unzip_dir.glob("**/auto_culling_cli.exe"))
+            # CLI entry point must ship at the archive root (flat layout)
+            cli_exes = list(unzip_dir.glob("auto_culling_cli.exe"))
             if cli_exes:
                 print(f"PASS: Portable ZIP carries CLI entry point at {cli_exes[0].relative_to(unzip_dir)}")
             else:
@@ -475,22 +476,22 @@ def test_windows_package(dist_dir: Path | None = None) -> bool:
             else:
                 print("WARNING: Uninstall.exe not present in sandbox installation directory.")
 
-            # Check installed sidecar binary & onedir structure
-            installed_sidecars = list(sandbox_install.glob("**/cull_sidecar.exe"))
-            if installed_sidecars:
-                sidecar_path = installed_sidecars[0]
-                if (sidecar_path.parent / "_internal").is_dir():
-                    print(f"PASS: Installed sidecar is onedir at {sidecar_path.relative_to(sandbox_install)}")
-                    tested_sidecar_bin = sidecar_path
+            # Check installed engine binary & onedir structure
+            installed_engine_bins = list(sandbox_install.glob("**/auto_culling_engine.exe"))
+            if installed_engine_bins:
+                engine_path = installed_engine_bins[0]
+                if (engine_path.parent / "lib").is_dir():
+                    print(f"PASS: Installed engine is onedir at {engine_path.relative_to(sandbox_install)}")
+                    tested_engine_bin = engine_path
                 else:
-                    print("FAIL: Installed sidecar is not onedir format (missing _internal/)")
+                    print("FAIL: Installed engine is not onedir format (missing lib/)")
                     success = False
             else:
-                print(f"FAIL: Installed directory does not contain cull_sidecar.exe")
+                print(f"FAIL: Installed directory does not contain auto_culling_engine.exe")
                 success = False
 
             # Installed CLI entry point must respond on stdout (console subsystem)
-            installed_cli = list(sandbox_install.glob("**/auto_culling_cli.exe"))
+            installed_cli = list(sandbox_install.glob("auto_culling_cli.exe"))
             if installed_cli:
                 try:
                     help_res = subprocess.run(
@@ -511,16 +512,16 @@ def test_windows_package(dist_dir: Path | None = None) -> bool:
                 print("FAIL: Installed directory does not contain auto_culling_cli.exe")
                 success = False
 
-            # 3. Test installed app launch and sidecar handshake
+            # 3. Test installed app launch and engine handshake
             if app_exe.exists():
-                print("\nTesting installed auto_culling.exe launch and sidecar handshake...")
+                print("\nTesting installed auto_culling.exe launch and engine handshake...")
                 app_proc = subprocess.Popen(
                     [str(app_exe)],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     cwd=str(sandbox_install),
                 )
-                sidecar_alive = False
+                engine_alive = False
                 handshake_deadline = time.time() + 25.0
                 gui_log = sandbox_install / "gui.log"
                 temp_log = Path(tempfile.gettempdir()) / "autoculling-gui.log"
@@ -529,20 +530,20 @@ def test_windows_package(dist_dir: Path | None = None) -> bool:
                     for log_cand in [gui_log, temp_log]:
                         if log_cand.exists():
                             content = log_cand.read_text(errors="ignore")
-                            if "spawn bundled sidecar" in content or "sidecar spawned and alive" in content:
-                                sidecar_alive = True
+                            if "spawn bundled engine" in content or "engine spawned and alive" in content:
+                                engine_alive = True
                                 break
-                    if sidecar_alive:
+                    if engine_alive:
                         break
-                    # Also probe process list for cull_sidecar.exe
+                    # Also probe process list for auto_culling_engine
                     try:
                         probe = subprocess.run(
                             ["powershell", "-NoProfile", "-Command",
-                             "Get-Process -Name cull_sidecar -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id"],
+                             "Get-Process -Name auto_culling_engine -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id"],
                             capture_output=True, text=True, timeout=3,
                         )
                         if probe.returncode == 0 and probe.stdout.strip():
-                            sidecar_alive = True
+                            engine_alive = True
                             break
                     except Exception:
                         pass
@@ -557,15 +558,15 @@ def test_windows_package(dist_dir: Path | None = None) -> bool:
                     app_proc.kill()
                 subprocess.run(
                     ["powershell", "-NoProfile", "-Command",
-                     "Stop-Process -Name cull_sidecar -Force -ErrorAction SilentlyContinue"],
+                     "Stop-Process -Name auto_culling_engine -Force -ErrorAction SilentlyContinue"],
                     capture_output=True,
                 )
 
-                if sidecar_alive:
-                    print("PASS: Installed AutoCulling.exe spawned the bundled sidecar successfully.")
+                if engine_alive:
+                    print("PASS: Installed AutoCulling.exe spawned the bundled engine successfully.")
                 else:
                     tail = gui_log.read_text(errors="ignore")[-500:] if gui_log.exists() else "(no gui.log)"
-                    print(f"FAIL: AutoCulling.exe did not spawn sidecar. Log tail:\n{tail}")
+                    print(f"FAIL: AutoCulling.exe did not spawn the engine. Log tail:\n{tail}")
                     success = False
 
         except Exception as e:
@@ -575,8 +576,8 @@ def test_windows_package(dist_dir: Path | None = None) -> bool:
         print("WARNING: No Windows NSIS setup.exe found in dist/")
 
     # 4. Post-installation Precision & Performance Guard
-    if tested_sidecar_bin and tested_sidecar_bin.exists():
-        print(f"\n=== Post-Installation Precision Guard on {tested_sidecar_bin.name} ===")
+    if tested_engine_bin and tested_engine_bin.exists():
+        print(f"\n=== Post-Installation Precision Guard on {tested_engine_bin.name} ===")
         test_suites = [
             ("JPG", ROOT / "tests/test_img", "*.jpg"),
             ("HEIF", ROOT / "test_import", "*.heif"),
@@ -584,7 +585,7 @@ def test_windows_package(dist_dir: Path | None = None) -> bool:
             ("NEF", ROOT / "test_nef", "*.nef"),
         ]
 
-        def run_sidecar_cull(cmd_prefix: list[str], target_dir: Path) -> tuple[dict[str, tuple[int, float]], float, list[str]]:
+        def run_engine_cull(cmd_prefix: list[str], target_dir: Path) -> tuple[dict[str, tuple[int, float]], float, list[str]]:
             proc = subprocess.Popen(
                 [*cmd_prefix, "--json-lines"],
                 stdin=subprocess.PIPE,
@@ -629,7 +630,7 @@ def test_windows_package(dist_dir: Path | None = None) -> bool:
 
         src_py = ROOT / ".venv/Scripts/python.exe"
         src_cmd = [str(src_py), str(ROOT / "cull_photos.py")]
-        pack_cmd = [str(tested_sidecar_bin)]
+        pack_cmd = [str(tested_engine_bin)]
 
         for fmt, target_dir, pattern in test_suites:
             if not target_dir.exists():
@@ -639,8 +640,8 @@ def test_windows_package(dist_dir: Path | None = None) -> bool:
                 continue
 
             print(f"Testing {fmt} format ({len(photos)} photos) in {target_dir.name}...")
-            src_ratings, src_elapsed, _ = run_sidecar_cull(src_cmd, target_dir)
-            pack_ratings, pack_elapsed, _ = run_sidecar_cull(pack_cmd, target_dir)
+            src_ratings, src_elapsed, _ = run_engine_cull(src_cmd, target_dir)
+            pack_ratings, pack_elapsed, _ = run_engine_cull(pack_cmd, target_dir)
 
             # Assert Precision
             if src_ratings and src_ratings == pack_ratings:

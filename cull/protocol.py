@@ -1,4 +1,4 @@
-"""JSON Lines protocol handler and event serialization for Tauri GUI sidecar.
+"""JSON Lines protocol handler and event serialization for the Tauri GUI engine.
 
 Outputs line-delimited JSON to stdout with strict mutex synchronization
 to prevent interleaved stdout corruption across worker threads.

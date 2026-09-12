@@ -262,19 +262,19 @@ jobs:
 
             GUI executable: `auto_culling(.exe)`. CLI is bundled inside every
             package (same engine, console entry point):
-            - Windows: `<install dir>\sidecar\auto_culling_cli.exe`
-            - macOS:   `AutoCulling.app/Contents/Resources/sidecar/auto_culling_cli`
+            - Windows: `<install dir>\auto_culling_cli.exe`
+            - macOS:   `AutoCulling.app/Contents/Resources/auto_culling_cli`
 
             Each package ships with a `.sha256` — verify with `shasum -a 256 <file>` / `Get-FileHash -Algorithm SHA256`.
 
             ```powershell
             # Windows — CLI batch culling (portable unzip or default install dir)
-            .\sidecar\auto_culling_cli.exe --input-dir C:\Photos\F1 --recursive --force
+            .\auto_culling_cli.exe --input-dir C:\Photos\F1 --recursive --force
             ```
 
             ```bash
             # macOS — CLI batch culling
-            /Applications/AutoCulling.app/Contents/Resources/sidecar/auto_culling_cli --input-dir /path/to/photos --recursive --force
+            /Applications/AutoCulling.app/Contents/Resources/auto_culling_cli --input-dir /path/to/photos --recursive --force
             ```
 
             Omit `--input-dir` to open a folder picker. `--force` re-analyzes already-rated files.

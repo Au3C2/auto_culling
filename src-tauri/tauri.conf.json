@@ -51,7 +51,7 @@
       }
     },
     "resources": {
-      "resources/sidecar": "sidecar",
+      "resources/engine": "",
       "resources/WebView2Loader.dll": "WebView2Loader.dll"
     },
     "icon": [

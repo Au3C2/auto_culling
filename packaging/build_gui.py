@@ -55,22 +55,23 @@ def get_rust_target_triple() -> str:
     return "x86_64-unknown-linux-gnu"
 
 
-def build_sidecar_binary() -> Path:
-    """Compile cull_photos into a windowed onedir sidecar using PyInstaller.
+def build_engine_binary() -> Path:
+    """Compile cull_photos into a windowed onedir engine using PyInstaller.
 
     onedir (not onefile): the onefile form re-extracts the whole ~160 MB
     bundle to a fresh temp dir on EVERY launch and re-pays the macOS
     signature-verification tax (~15-25 s). The onedir form starts instantly
-    and is shipped via Tauri resources.
+    and is shipped via Tauri resources in a FLAT layout: the engine and CLI
+    bootloaders land at the install root next to their shared `lib/` tree.
     """
-    print("=== Step 1: Building Python Sidecar (onedir) ===")
-    spec_path = ROOT / "cull_sidecar.spec"
+    print("=== Step 1: Building Python Engine (onedir) ===")
+    spec_path = ROOT / "engine.spec"
     if not spec_path.exists():
-        raise FileNotFoundError("cull_sidecar.spec not found in project root")
+        raise FileNotFoundError("engine.spec not found in project root")
 
     # Guard against the 0-byte placeholder trap: tauri build silently packs
     # whatever sits in src-tauri/binaries/, so a stale empty file produces a
-    # broken DMG whose sidecar fails with Permission denied at runtime.
+    # broken DMG whose engine fails with Permission denied at runtime.
     triple = get_rust_target_triple()
     ext = ".exe" if sys.platform == "win32" else ""
     legacy_bin = SRC_TAURI / "binaries" / f"cull-sidecar-{triple}{ext}"
@@ -88,29 +89,32 @@ def build_sidecar_binary() -> Path:
     print(f"Running: {' '.join(cmd)}")
     subprocess.run(cmd, cwd=str(ROOT), check=True, env=env)
 
-    sidecar_dir = ROOT / "dist" / "cull_sidecar"
-    sidecar_bin = sidecar_dir / ("cull_sidecar.exe" if sys.platform == "win32" else "cull_sidecar")
-    if not sidecar_bin.exists():
-        raise FileNotFoundError(f"Expected onedir sidecar binary at {sidecar_bin}")
-    # The spec builds TWO entry points sharing one _internal: the windowed
-    # cull_sidecar (spawned by Tauri) and the console auto_culling_cli
+    engine_dir = ROOT / "dist" / "engine"
+    engine_bin = engine_dir / ("auto_culling_engine.exe" if sys.platform == "win32" else "auto_culling_engine")
+    if not engine_bin.exists():
+        raise FileNotFoundError(f"Expected onedir engine binary at {engine_bin}")
+    # The spec builds TWO entry points sharing one lib/: the windowed
+    # auto_culling_engine (spawned by Tauri) and the console auto_culling_cli
     # (user-facing CLI). Both must exist or the release is incomplete.
-    cli_bin = sidecar_dir / ("auto_culling_cli.exe" if sys.platform == "win32" else "auto_culling_cli")
+    cli_bin = engine_dir / ("auto_culling_cli.exe" if sys.platform == "win32" else "auto_culling_cli")
     if not cli_bin.exists():
         raise FileNotFoundError(f"Expected onedir CLI entry point at {cli_bin}")
 
-    print(f"PASS: Compiled onedir sidecar: {sidecar_dir} ({sum(f.stat().st_size for f in sidecar_dir.rglob('*') if f.is_file()) / 1024 / 1024:.1f} MB)")
+    print(f"PASS: Compiled onedir engine: {engine_dir} ({sum(f.stat().st_size for f in engine_dir.rglob('*') if f.is_file()) / 1024 / 1024:.1f} MB)")
 
-    # Ship the onedir via Tauri resources (src-tauri/resources/sidecar/)
-    res_dir = SRC_TAURI / "resources" / "sidecar"
+    # Ship the onedir via Tauri resources (src-tauri/resources/engine/).
+    # tauri.conf.json maps "resources/engine" -> "" so the contents land
+    # FLAT in the resource dir (install root on Windows, Contents/Resources
+    # on macOS) instead of a nested engine/ folder.
+    res_dir = SRC_TAURI / "resources" / "engine"
     shutil.rmtree(res_dir, ignore_errors=True)
-    shutil.copytree(sidecar_dir, res_dir)
+    shutil.copytree(engine_dir, res_dir)
     if sys.platform != "win32":
-        os.chmod(sidecar_bin, 0o755)
+        os.chmod(engine_bin, 0o755)
         os.chmod(cli_bin, 0o755)
 
-    print(f"PASS: Staged sidecar onedir to {res_dir}")
-    return sidecar_bin
+    print(f"PASS: Staged engine onedir to {res_dir}")
+    return engine_bin
 
 
 def build_tauri_gui() -> None:
@@ -228,20 +232,20 @@ def organize_dist_artifacts() -> list[Path]:
             print(f"Output Setup EXE: {dst_exe} ({dst_exe.stat().st_size / 1024 / 1024:.1f} MB)")
             collected_artifacts.append(dst_exe)
 
-        # 2. Portable ZIP — app exe + onedir sidecar resources so the
-        #    green build resolves the sidecar exactly like the NSIS install.
-        #    Layout mirrors the NSIS target mapping ("resources/sidecar" ->
-        #    "sidecar"): auto_culling.exe + WebView2Loader.dll at root,
-        #    engine onedir (cull_sidecar + auto_culling_cli + _internal)
-        #    under sidecar/.
+        # 2. Portable ZIP — engine + CLI bootloaders and their shared lib/
+        #    tree at the archive ROOT so the green build resolves the engine
+        #    exactly like the NSIS install. Layout mirrors the NSIS target
+        #    mapping ("resources/engine" -> ""):
+        #    auto_culling.exe + auto_culling_engine.exe + auto_culling_cli.exe
+        #    + WebView2Loader.dll + lib/ (deps, models, exiftool) all at root.
         release_exe = None
         for cand in (SRC_TAURI / "target/release/auto_culling.exe",
                      SRC_TAURI / "target/release/AutoCulling.exe"):
             if cand.exists():
                 release_exe = cand
                 break
-        sidecar_stage = SRC_TAURI / "resources/sidecar"
-        if release_exe is not None and sidecar_stage.exists():
+        engine_stage = SRC_TAURI / "resources/engine"
+        if release_exe is not None and engine_stage.exists():
             portable_zip = dist_dir / f"AutoCulling_v{ver}_win_x64_portable.zip"
             with zipfile.ZipFile(portable_zip, "w", zipfile.ZIP_DEFLATED) as z:
                 z.write(release_exe, "auto_culling.exe")
@@ -254,9 +258,9 @@ def organize_dist_artifacts() -> list[Path]:
                     if wv2.exists():
                         z.write(wv2, "WebView2Loader.dll")
                         break
-                for f in sorted(sidecar_stage.rglob("*")):
+                for f in sorted(engine_stage.rglob("*")):
                     if f.is_file():
-                        z.write(f, str(Path("sidecar") / f.relative_to(sidecar_stage)))
+                        z.write(f, str(f.relative_to(engine_stage)))
             print(f"Output Portable ZIP: {portable_zip} ({portable_zip.stat().st_size / 1024 / 1024:.1f} MB)")
             collected_artifacts.append(portable_zip)
 
@@ -272,12 +276,13 @@ def organize_dist_artifacts() -> list[Path]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--skip-sidecar", action="store_true", help="Skip compiling sidecar binary")
+    parser.add_argument("--skip-engine", "--skip-sidecar", dest="skip_engine",
+                        action="store_true", help="Skip compiling the engine binary")
     args = parser.parse_args()
 
     try:
-        if not args.skip_sidecar:
-            build_sidecar_binary()
+        if not args.skip_engine:
+            build_engine_binary()
         build_tauri_gui()
         organize_dist_artifacts()
         print("\nAll GUI Packaging steps completed successfully!")

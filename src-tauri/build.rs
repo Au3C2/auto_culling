@@ -1,5 +1,5 @@
 fn main() {
-    let _ = std::fs::create_dir_all("resources/sidecar");
+    let _ = std::fs::create_dir_all("resources/engine");
     // Ensure resources/WebView2Loader.dll exists so tauri-build never fails on missing resource
     let wv2_path = std::path::Path::new("resources/WebView2Loader.dll");
     if !wv2_path.exists() {

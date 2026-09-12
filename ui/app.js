@@ -2,7 +2,7 @@
  * Auto-Culling Tauri GUI Application Logic (Taubyte / Tau Cyber Edition)
  * 
  * Handles:
- * - IPC Communication with Tauri Rust / Resident Python Sidecar
+ * - IPC Communication with Tauri Rust / Resident Python Engine
  * - Dynamic Configuration Persistence with localStorage
  * - Real-time Progress, Speed (张/秒) & ETA Calculations
  * - Virtual/Incremental Table Rendering, Sorting & Filtering
@@ -242,7 +242,7 @@
     els.frameStat.textContent = `SCORED ${state.scoredCount}/${state.totalFiles} · KEEP ${state.keepCount} · REJECT ${state.rejectCount}`;
   }
 
-  // --- Event Handlers (Sidecar Stream) ---
+  // --- Event Handlers (Engine Stream) ---
   function setupEventListeners() {
     // 1. Directory Scanned
     listenTauri('scanned', ({ payload }) => {
@@ -349,9 +349,9 @@
       appendLog(payload.line || JSON.stringify(payload));
     });
 
-    // 7. Sidecar lifecycle errors (startup warmup failures etc.)
-    listenTauri('sidecar-error', ({ payload }) => {
-      appendLog(`[Sidecar Error] ${payload && payload.message ? payload.message : JSON.stringify(payload)}`);
+    // 7. Engine lifecycle errors (startup warmup failures etc.)
+    listenTauri('engine-error', ({ payload }) => {
+      appendLog(`[Engine Error] ${payload && payload.message ? payload.message : JSON.stringify(payload)}`);
       if (!state.isRunning) {
         els.stageStatus.textContent = '引擎启动失败（详见日志）';
       }

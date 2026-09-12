@@ -134,7 +134,7 @@ def _build_config(args: argparse.Namespace, input_dir: Path) -> EngineConfig:
 
 
 def run_json_lines(args: argparse.Namespace, input_dir: Path | None) -> int:
-    """Resident JSON Lines sidecar for the Tauri GUI."""
+    """Resident JSON Lines engine for the Tauri GUI."""
     import base64
     import io
     import json
@@ -168,7 +168,7 @@ def run_json_lines(args: argparse.Namespace, input_dir: Path | None) -> int:
                     continue
                 if not isinstance(cmd, dict):
                     continue
-                log.info("sidecar command: %s", cmd.get("cmd"))
+                log.info("engine command: %s", cmd.get("cmd"))
                 if cmd.get("cmd") == "cancel":
                     cancel_event.set()
                     continue
@@ -404,7 +404,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--deterministic", action="store_true")
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("--json-lines", action="store_true",
-                        help="JSON Lines sidecar mode for the Tauri GUI")
+                        help="JSON Lines engine mode for the Tauri GUI")
 
     return parser.parse_args(argv)
 
