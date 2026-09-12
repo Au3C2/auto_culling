@@ -13,7 +13,8 @@ use tokio::sync::oneshot;
 struct EngineState {
     child: Option<Child>,
     stdin: Option<ChildStdin>,
-    preview_waiters: Arc<Mutex<HashMap<String, Vec<oneshot::Sender<serde_json::Value>>>>>,
+    preview_waiters: Arc<Mutex<HashMap<String, Vec<(u64, oneshot::Sender<serde_json::Value>)>>>>,
+    preview_seq: Arc<std::sync::atomic::AtomicU64>,
 }
 
 #[tauri::command]
@@ -206,18 +207,18 @@ fn ensure_engine(app: &AppHandle, state: &mut EngineState) -> Result<(), String>
                 if line_trimmed.is_empty() {
                     continue;
                 }
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(line_trimmed) {
-                    if let Some(event_type) = val.get("type").and_then(|t| t.as_str()).map(|s| s.to_string()) {
-                        if event_type == "preview" {
-                            if let Some(path) = val.get("path").and_then(|p| p.as_str()) {
-                                let mut map = waiters.lock().unwrap();
-                                if let Some(senders) = map.remove(path) {
-                                    for sender in senders {
-                                        let _ = sender.send(val.clone());
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(line_trimmed) {
+                        if let Some(event_type) = val.get("type").and_then(|t| t.as_str()).map(|s| s.to_string()) {
+                            if event_type == "preview" {
+                                if let Some(path) = val.get("path").and_then(|p| p.as_str()) {
+                                    let mut map = waiters.lock().unwrap();
+                                    if let Some(senders) = map.remove(path) {
+                                        for (_, sender) in senders {
+                                            let _ = sender.send(val.clone());
+                                        }
                                     }
                                 }
                             }
-                        }
                         // Emit event to webview
                         let _ = app_clone.emit(&event_type, val);
                     }
@@ -326,12 +327,17 @@ async fn preview(
     size: Option<u32>,
 ) -> Result<serde_json::Value, String> {
     let (tx, rx) = oneshot::channel();
+    let request_id = state
+        .lock()
+        .unwrap()
+        .preview_seq
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     {
         let waiters = {
             let guard = state.lock().unwrap();
             Arc::clone(&guard.preview_waiters)
         };
-        waiters.lock().unwrap().entry(path.clone()).or_insert_with(Vec::new).push(tx);
+        waiters.lock().unwrap().entry(path.clone()).or_insert_with(Vec::new).push((request_id, tx));
 
         let payload = serde_json::json!({
             "cmd": "preview",
@@ -339,23 +345,57 @@ async fn preview(
             "size": size.unwrap_or(640)
         });
         let mut guard = state.lock().unwrap();
-        send_engine_command(&app, &mut guard, payload)?;
+        if let Err(err) = send_engine_command(&app, &mut guard, payload) {
+            // Drop this request's waiter so failed sends don't leak entries.
+            let mut map = waiters.lock().unwrap();
+            if let Some(v) = map.get_mut(&path) {
+                v.retain(|(id, _)| *id != request_id);
+                if v.is_empty() {
+                    map.remove(&path);
+                }
+            }
+            return Err(err);
+        }
     }
 
-    match tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
+    let result = match tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
         Ok(Ok(val)) => Ok(val),
         Ok(Err(_)) => Err("Preview channel dropped".into()),
         Err(_) => Err("Preview request timed out".into()),
+    };
+    if result.is_err() {
+        // Timed-out / dropped requests must not accumulate in the waiters map.
+        let waiters = {
+            let guard = state.lock().unwrap();
+            Arc::clone(&guard.preview_waiters)
+        };
+        let mut map = waiters.lock().unwrap();
+        if let Some(v) = map.get_mut(&path) {
+            v.retain(|(id, _)| *id != request_id);
+            if v.is_empty() {
+                map.remove(&path);
+            }
+        }
     }
+    result
 }
 
 #[tauri::command]
 async fn export_csv(
-    _app: AppHandle,
-    _state: State<'_, Arc<Mutex<EngineState>>>,
+    app: AppHandle,
+    state: State<'_, Arc<Mutex<EngineState>>>,
     dir: String,
 ) -> Result<String, String> {
-    let path = PathBuf::from(dir).join("scores.csv");
+    // The engine holds the scored results — forward the request and let the
+    // engine write <dir>/scores.csv; the UI gets confirmation via the
+    // "export_done" event (or "error" on failure).
+    let path = PathBuf::from(&dir).join("scores.csv");
+    let payload = serde_json::json!({
+        "cmd": "export_csv",
+        "path": path.to_string_lossy()
+    });
+    let mut guard = state.lock().unwrap();
+    send_engine_command(&app, &mut guard, payload)?;
     Ok(path.to_string_lossy().to_string())
 }
 
@@ -364,6 +404,7 @@ fn main() {
         child: None,
         stdin: None,
         preview_waiters: Arc::new(Mutex::new(HashMap::new())),
+        preview_seq: Arc::new(std::sync::atomic::AtomicU64::new(0)),
     }));
 
     let engine_clone = Arc::clone(&engine_state);

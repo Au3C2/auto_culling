@@ -83,6 +83,9 @@ class EngineConfig:
     label_check: bool = False
     label_check_dir: Path | None = None
     deterministic: bool = False
+    # GUI mode: frame log lines carry the full path so protocol events can
+    # key photos unambiguously (duplicate basenames across recursive dirs).
+    log_full_paths: bool = False
 
 class CullingEngine:
     """
@@ -94,6 +97,10 @@ class CullingEngine:
         self.exif_map: dict[Path, ExifData] = {}
         self.groups: list[BurstGroup] = []
         self.all_scores: list[ImageScore] = []
+        # Frames skipped because decoding failed (kept out of all_scores on
+        # purpose; surfaced separately so GUI totals stay consistent).
+        self.failed_count: int = 0
+        self._failed_lock = threading.Lock()
         self.f1_model = None
         self.coco_model = None
         self.cloud_f1 = None
@@ -372,6 +379,7 @@ class CullingEngine:
             check_p4 = any(k in dir_name for k in keywords) and "sprint_quali" not in dir_name
 
         for frame_idx, frame_path in enumerate(frames):
+            label = str(frame_path) if self.config.log_full_paths else frame_path.name
             if cancel_event and cancel_event.is_set():
                 log.info("Cancel requested; stopping group %s early", group.group_id)
                 break
@@ -388,14 +396,14 @@ class CullingEngine:
                 if not is_rating_set:
                     final_rating = 1 if final_pick == 1 else (-1 if final_pick == -1 else 0)
                 manual_score = ImageScore(
-                    path=frame_path, s_sharp=1.0, s_comp=1.0, 
+                    path=frame_path, s_sharp=1.0, s_comp=1.0,
                     raw_score=10.0 if final_rating > 0 else 0.0,
-                    rating=final_rating, vetoed=(final_rating == -1), 
+                    rating=final_rating, vetoed=(final_rating == -1),
                     veto_reason="manual_metadata", is_manual=True
                 )
                 scores.append(manual_score)
                 log.info(
-                    FRAME_LOG_FMT, frame_path.name, manual_score.s_sharp,
+                    FRAME_LOG_FMT, label, manual_score.s_sharp,
                     manual_score.s_comp, manual_score.raw_score, manual_score.rating,
                     "  (manual_metadata)"
                 )
@@ -405,8 +413,10 @@ class CullingEngine:
             img_rgb = decode_loader(frame_idx) if decode_loader is not None else \
                 load_image_rgb(frame_path, scale_width=self.config.scale_width)
             if img_rgb is None:
+                with self._failed_lock:
+                    self.failed_count += 1
                 log.info(
-                    FRAME_LOG_FMT, frame_path.name, 0.0, 0.0, 0.0, 0,
+                    FRAME_LOG_FMT, label, 0.0, 0.0, 0.0, 0,
                     "  (decode_failed)"
                 )
                 continue
@@ -440,13 +450,23 @@ class CullingEngine:
             
             log.info(
                 "  [%s]  sharp=%.3f  comp=%.3f  raw=%.2f  Rating=%+d%s",
-                frame_path.name, s_sharp, s_comp, img_score.raw_score,
+                label, s_sharp, s_comp, img_score.raw_score,
                 img_score.rating, f"  ({img_score.veto_reason})" if img_score.vetoed else ""
             )
 
             prev_detections = detections if detections else None
 
+        # Top-N selection mutates ratings in place; the GUI already received
+        # the pre-Top-N frame events, so re-emit only the frames whose final
+        # rating differs (the protocol marks them "(topn_final)").
+        pre_ratings = {s.path: s.rating for s in scores}
         select_best_n(scores, top_n=self.config.top_n)
+        for s in scores:
+            if s.rating != pre_ratings.get(s.path):
+                log.info(
+                    FRAME_LOG_FMT, label, s.s_sharp, s.s_comp, s.raw_score,
+                    s.rating, "  (topn_final)"
+                )
         
         if self.config.autocrop:
             for s in scores:

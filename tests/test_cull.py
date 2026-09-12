@@ -38,7 +38,10 @@ def run_cull(input_dir: Path, backend: str, csv_path: Path | None = None, worker
         sys.executable, "cull_photos.py",
         "--input-dir", str(input_dir),
         "--workers", str(workers),
-        "--force"
+        "--force",
+        # Guards pin the P4 policy: the user-facing CLI default is `never`,
+        # but the committed baselines were locked with P4 active.
+        "--p4-policy", "always"
     ]
     if csv_path is not None:
         cmd += ["--dump-scores", str(csv_path)]

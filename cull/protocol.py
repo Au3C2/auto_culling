@@ -61,20 +61,34 @@ class JsonLinesHandler(logging.Handler):
             })
             return
 
-        # Check scored frame event
+        # Check scored frame event. In GUI mode the engine logs the FULL path
+        # so photos are keyed unambiguously (duplicate basenames across
+        # recursive dirs); CLI mode logs the bare filename.
         mf = self._RE_FRAME.search(msg)
         if mf:
-            name, sharp, comp, raw, rating, veto1, veto2 = mf.groups()
+            name_raw, sharp, comp, raw, rating, veto1, veto2 = mf.groups()
             veto = veto1 or veto2 or ""
+            if "/" in name_raw or "\\" in name_raw:
+                path = name_raw
+                name = name_raw.replace("\\", "/").rsplit("/", 1)[-1]
+            else:
+                path = None
+                name = name_raw
+            status = {
+                "decode_failed": "decode_failed",
+                "manual_metadata": "manual_metadata",
+                "topn_final": "topn_final",
+            }.get(veto, "scored")
             emit({
                 "type": "frame",
                 "name": name,
+                "path": path,
                 "rating": int(rating),
                 "sharp": float(sharp),
                 "comp": float(comp),
                 "raw": float(raw),
-                "veto": veto,
-                "status": "scored",
+                "veto": "" if status == "topn_final" else veto,
+                "status": status,
             })
             return
 

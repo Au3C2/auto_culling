@@ -149,6 +149,7 @@ def run_json_lines(args: argparse.Namespace, input_dir: Path | None) -> int:
 
     cmd_queue: "queue.Queue[dict]" = queue.Queue()
     last_scores: dict[Path, ImageScore] = {}
+    last_engine = None
 
     def stdin_reader() -> None:
         try:
@@ -175,13 +176,18 @@ def run_json_lines(args: argparse.Namespace, input_dir: Path | None) -> int:
                 if cmd.get("cmd") == "preview":
                     do_preview(cmd)
                     continue
+                if cmd.get("cmd") == "run":
+                    # Clear any stale cancel HERE — at the moment the run is
+                    # requested — so a cancel sent after this point survives
+                    # until engine.run() checks it. Clearing inside do_run
+                    # instead races a cancel that arrives between queueing
+                    # and execution (it would be wiped and the cancel lost).
+                    cancel_event.clear()
                 cmd_queue.put(cmd)
                 if cmd.get("cmd") == "quit":
                     return
         except Exception:
             pass
-
-    threading.Thread(target=stdin_reader, daemon=True).start()
 
     def do_scan(cmd: dict) -> None:
         raw_dir = cmd.get("dir") or (str(input_dir) if input_dir else "")
@@ -192,14 +198,17 @@ def run_json_lines(args: argparse.Namespace, input_dir: Path | None) -> int:
         recursive = bool(cmd.get("recursive", args.recursive))
         try:
             shots, _standalone = CullingEngine.collect_shots(directory, recursive)
+            # Full paths (not basenames) — recursive folders can contain the
+            # same filename twice and a basename key would lose entries.
             emit({"type": "scanned", "dir": str(directory),
                   "count": len(shots),
                   "total": len(shots),
-                  "paths": {p.name: str(p) for p in shots}})
+                  "paths": [str(p) for p in shots]})
         except Exception as exc:
             emit({"type": "scan_error", "message": str(exc)})
 
     def do_run(cmd: dict) -> None:
+        nonlocal last_engine
         merged = argparse.Namespace(**vars(args))
         for key, value in cmd.get("config", {}).items():
             setattr(merged, key, value)
@@ -215,7 +224,8 @@ def run_json_lines(args: argparse.Namespace, input_dir: Path | None) -> int:
             return
 
         config = _build_config(merged, run_input)
-        cancel_event.clear()
+        # GUI protocol keys frames by full path (scan results do the same)
+        config.log_full_paths = True
         engine = CullingEngine(config)
 
         def progress(msg: str, p: float) -> None:
@@ -235,17 +245,19 @@ def run_json_lines(args: argparse.Namespace, input_dir: Path | None) -> int:
             emit({"type": "cancelled", "count": len(scores)})
             return
 
+        last_engine = engine
         last_scores.clear()
         for s in scores:
             last_scores[s.path] = s
         total = len(scores)
         keep = sum(1 for s in scores if s.rating > 0)
+        failed = getattr(engine, "failed_count", 0)
         stars: dict[int, int] = {}
         for s in scores:
             if s.rating > 0:
                 stars[s.rating] = stars.get(s.rating, 0) + 1
         emit({"type": "done", "elapsed": elapsed, "total": total, "keep": keep,
-              "reject": total - keep, "stars": stars})
+              "reject": total - keep, "failed": failed, "stars": stars})
 
     def do_preview(cmd: dict) -> None:
         def _worker():
@@ -298,6 +310,26 @@ def run_json_lines(args: argparse.Namespace, input_dir: Path | None) -> int:
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    def do_export_csv(cmd: dict) -> None:
+        out_str = cmd.get("path") or (str(input_dir / "scores.csv") if input_dir else "")
+        if not out_str:
+            emit({"type": "error", "message": "no output path for CSV export"})
+            return
+        if last_engine is None or not last_engine.all_scores:
+            emit({"type": "error", "message": "no scores available — run a culling first"})
+            return
+        try:
+            last_engine.export_scores_csv(Path(out_str))
+            emit({"type": "export_done", "path": str(out_str)})
+        except Exception as exc:
+            log.warning("CSV export failed: %s", exc)
+            emit({"type": "error", "message": f"CSV export failed: {exc}"})
+
+    # Start the reader only after every handler exists — a command arriving
+    # during the definition window used to raise NameError inside the reader
+    # thread and kill it for the rest of the session.
+    threading.Thread(target=stdin_reader, daemon=True).start()
+
     while True:
         cmd = cmd_queue.get()
         kind = cmd.get("cmd")
@@ -309,6 +341,8 @@ def run_json_lines(args: argparse.Namespace, input_dir: Path | None) -> int:
             do_run(cmd)
         elif kind == "preview":
             do_preview(cmd)
+        elif kind == "export_csv":
+            do_export_csv(cmd)
 
 
 def run(args: argparse.Namespace) -> int:
@@ -391,7 +425,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--w-comp", type=float, default=W_COMP)
     parser.add_argument("--min-raw", type=float, default=MIN_RAW)
     parser.add_argument("--conf", type=float, default=0.25)
-    parser.add_argument("--p4-policy", choices=["always", "never", "auto"], default="always")
+    parser.add_argument("--p4-policy", choices=["always", "never", "auto"], default="never")
     parser.add_argument("--rename", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("-f", "--force", action="store_true")

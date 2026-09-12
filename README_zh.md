@@ -101,7 +101,7 @@ python packaging/build_gui.py    # 调试 GUI 时可加 --skip-engine 跳过 PyI
 | `--workers N` | 解码进程池大小（默认 8；星级与 worker 数无关） |
 | `--top-n 11` | 每组连拍最多保留张数 |
 | `--scale-width 1280` | 评分链解码分辨率 |
-| `--p4-policy` | `always`（默认）/ `never` / `auto`（仅 F1/GP 目录） |
+| `--p4-policy` | `never`（默认）/ `always` / `auto`（仅 F1/GP 目录） |
 | `--crop-off` | 关闭自动裁剪写入 |
 | `--dry-run` | 只评分与报告，不写任何元数据 |
 | `--dump-scores FILE` | 导出逐图 CSV（锐度/构图/原始分/星级） |

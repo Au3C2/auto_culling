@@ -18,7 +18,7 @@
     inputDir: '',
     isRunning: false,
     photos: [],         // Array of photo records: { name, path, rating, sharp, comp, raw, veto, status }
-    photoMap: new Map(),// name -> photo record
+    photoMap: new Map(),// full path -> photo record (basenames are not unique in recursive scans)
     filter: 'all',      // 'all' | 'keep' | 'reject'
     sortField: 'name',
     sortAsc: true,
@@ -27,6 +27,7 @@
     scoredCount: 0,
     keepCount: 0,
     rejectCount: 0,
+    failedCount: 0,
     startTime: 0,
     tableRatio: 0.5,
   };
@@ -246,16 +247,20 @@
   function setupEventListeners() {
     // 1. Directory Scanned
     listenTauri('scanned', ({ payload }) => {
-      const paths = payload.paths || {};
-      const count = payload.count || Object.keys(paths).length;
+      // paths is an array of FULL paths — basenames collide in recursive scans.
+      const paths = Array.isArray(payload.paths)
+        ? payload.paths
+        : Object.values(payload.paths || {});
+      const count = payload.count || paths.length;
       state.totalFiles = count;
       state.photos = [];
       state.photoMap.clear();
 
-      for (const [name, p] of Object.entries(paths)) {
+      for (const p of paths) {
+        const name = String(p).split(/[\\/]/).pop();
         const item = {
           name,
-          path: p,
+          path: String(p),
           rating: 0,
           sharp: 0,
           comp: 0,
@@ -264,12 +269,13 @@
           status: 'pending',
         };
         state.photos.push(item);
-        state.photoMap.set(name, item);
+        state.photoMap.set(item.path, item);
       }
 
       state.scoredCount = 0;
       state.keepCount = 0;
       state.rejectCount = 0;
+      state.failedCount = 0;
 
       els.stageStatus.textContent = `已发现 ${count} 张照片`;
       els.frameStat.textContent = `待筛选: 共 ${count} 张照片`;
@@ -299,7 +305,7 @@
 
     // 3. Scored Frame Event
     listenTauri('frame', ({ payload }) => {
-      const item = state.photoMap.get(payload.name);
+      const item = state.photoMap.get(payload.path || payload.name);
       if (!item) return;
 
       item.rating = payload.rating;
@@ -308,6 +314,20 @@
       item.raw = payload.raw;
       item.veto = payload.veto;
       item.status = payload.status;
+
+      // Only first-pass events advance the counters. "topn_final" events are
+      // re-emissions of already-scored frames after the per-burst Top-N
+      // downgrade; "decode_failed" frames never enter the scored totals (the
+      // engine excludes them from done.total as well).
+      if (payload.status === 'topn_final') {
+        updateTableRow(item);
+        return;
+      }
+      if (payload.status === 'decode_failed') {
+        state.failedCount++;
+        updateTableRow(item);
+        return;
+      }
 
       state.scoredCount++;
       if (payload.rating > 0) state.keepCount++;
@@ -336,7 +356,8 @@
         <span class="tau-stat-sep">·</span>
         <span class="tau-stat-label">TIME:</span> <span class="tau-stat-val">${(payload.elapsed || 0).toFixed(1)}s</span>
       `;
-      finishRun(`完成 · 保留 ${payload.keep} · 丢弃 ${payload.reject}`);
+      finishRun(`完成 · 保留 ${payload.keep} · 丢弃 ${payload.reject}` +
+        (payload.failed ? ` · 失败 ${payload.failed}` : ''));
     });
 
     // 5. Cancelled Event
@@ -355,6 +376,30 @@
       if (!state.isRunning) {
         els.stageStatus.textContent = '引擎启动失败（详见日志）';
       }
+    });
+
+    // 8. Engine run/scan errors — without these the UI would stay stuck on
+    //    "scanning/running" when the engine reports an error.
+    listenTauri('error', ({ payload }) => {
+      const msg = payload && payload.message ? payload.message : JSON.stringify(payload);
+      appendLog(`[Error] ${msg}`);
+      if (state.isRunning) {
+        finishRun(`运行失败: ${msg}`);
+      } else {
+        els.stageStatus.textContent = `错误: ${msg}`;
+      }
+    });
+
+    listenTauri('scan_error', ({ payload }) => {
+      const msg = payload && payload.message ? payload.message : JSON.stringify(payload);
+      appendLog(`[Scan Error] ${msg}`);
+      els.stageStatus.textContent = `扫描失败: ${msg}`;
+    });
+
+    // 9. CSV export confirmation (the engine writes the file asynchronously)
+    listenTauri('export_done', ({ payload }) => {
+      appendLog(`[Export] scores.csv written to ${payload.path}`);
+      els.stageStatus.textContent = `已导出: ${payload.path}`;
     });
   }
 
@@ -385,8 +430,13 @@
     els.tableBody.innerHTML = html;
   }
 
+  // Row DOM ids must key on the full path — basenames collide in recursive scans.
+  function rowIdFor(item) {
+    return `row-${item.path.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+  }
+
   function buildRowHtml(item) {
-    const isSelected = state.selectedPhoto && state.selectedPhoto.name === item.name;
+    const isSelected = state.selectedPhoto && state.selectedPhoto.path === item.path;
     const ratingDisplay = item.status === 'pending'
       ? '<span style="color:#475569;">—</span>'
       : item.rating > 0
@@ -401,10 +451,14 @@
 
     const statusDisplay = item.status === 'pending'
       ? '<span style="color:#64748b;">QUEUED</span>'
-      : (item.status === 'scored' ? '<span style="color:#00e5ff;">SCORED</span>' : item.status);
+      : (item.status === 'decode_failed'
+        ? '<span style="color:#f87171;">FAILED</span>'
+        : (item.status === 'scored' || item.status === 'topn_final'
+          ? '<span style="color:#00e5ff;">SCORED</span>'
+          : item.status));
 
     return `
-      <tr id="row-${item.name.replace(/[^a-zA-Z0-9_-]/g, '_')}" data-name="${item.name}" class="${isSelected ? 'selected' : ''}">
+      <tr id="${rowIdFor(item)}" data-path="${item.path}" class="${isSelected ? 'selected' : ''}">
         <td title="${item.name}" style="font-family: var(--tau-font-mono); font-weight: 500;">${item.name}</td>
         <td class="tau-th-num">${ratingDisplay}</td>
         <td class="tau-th-num" style="font-family: var(--tau-font-mono);">${item.sharp ? item.sharp.toFixed(3) : '—'}</td>
@@ -417,8 +471,7 @@
   }
 
   function updateTableRow(item) {
-    const rowId = `row-${item.name.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-    const row = document.getElementById(rowId);
+    const row = document.getElementById(rowIdFor(item));
     if (!row) {
       renderTable();
       return;
@@ -442,7 +495,7 @@
     row.replaceWith(newRow);
     newRow.classList.add('flash');
 
-    if (state.selectedPhoto && state.selectedPhoto.name === item.name) {
+    if (state.selectedPhoto && state.selectedPhoto.path === item.path) {
       selectPhoto(item);
     }
   }
@@ -472,8 +525,7 @@
     if (!item) return;
     state.selectedPhoto = item;
     document.querySelectorAll('#photoTable tbody tr').forEach((r) => r.classList.remove('selected'));
-    const rowId = `row-${item.name.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-    const row = document.getElementById(rowId);
+    const row = document.getElementById(rowIdFor(item));
     if (row) row.classList.add('selected');
 
     els.previewTitle.textContent = item.name;
@@ -588,17 +640,17 @@
     els.tableBody.addEventListener('click', (e) => {
       const row = e.target.closest('tr');
       if (!row || row.classList.contains('tau-empty-row')) return;
-      const name = row.getAttribute('data-name');
-      const item = state.photoMap.get(name);
+      const item = state.photoMap.get(row.getAttribute('data-path'));
       if (item) selectPhoto(item);
     });
 
-    // Export CSV
+    // Export CSV — the command is queued to the engine; the actual write is
+    // confirmed by the "export_done" event (or "error" on failure).
     els.btnExportCsv.addEventListener('click', async () => {
       if (state.photos.length === 0) return;
       try {
-        const res = await invokeTauri('export_csv', { dir: state.inputDir });
-        alert(`打分结果 CSV 导出完成: ${res || 'scores.csv'}`);
+        await invokeTauri('export_csv', { dir: state.inputDir });
+        els.stageStatus.textContent = '正在导出 scores.csv ...';
       } catch (err) {
         alert(`导出失败: ${err}`);
       }

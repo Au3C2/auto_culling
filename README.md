@@ -106,7 +106,7 @@ builds the same packages on every push and runs the install/launch tests against
 | `--workers N` | Decode-pool size (default 8; ratings are worker-invariant) |
 | `--top-n 11` | Max keepers per burst group |
 | `--scale-width 1280` | Decode resolution for the scoring chain |
-| `--p4-policy` | `always` (default) / `never` / `auto` (F1/GP folders only) |
+| `--p4-policy` | `never` (default) / `always` / `auto` (F1/GP folders only) |
 | `--crop-off` | Disable auto-crop writing |
 | `--dry-run` | Score and report without writing any metadata |
 | `--dump-scores FILE` | Export per-image CSV (sharp/comp/raw/rating) |

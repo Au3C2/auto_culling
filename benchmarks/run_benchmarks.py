@@ -197,9 +197,10 @@ def _command(tmp: Path, workers: int) -> list[str]:
     exe = os.environ.get("CULL_EXE")
     if exe:
         return [exe, "--input-dir", str(tmp), "--workers", str(workers),
-                "--force", "--dry-run"]
+                "--force", "--p4-policy", "always", "--dry-run"]
     return [SYS, str(ROOT / "cull_photos.py"), "--input-dir", str(tmp),
-            "--workers", str(workers), "--force", "--dry-run"]
+            "--workers", str(workers), "--force", "--p4-policy", "always",
+            "--dry-run"]
 
 
 RUN_TIMEOUT = 600  # per engine call; local gate runs in ~3 min per format,
