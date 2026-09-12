@@ -219,8 +219,13 @@ fn ensure_engine(app: &AppHandle, state: &mut EngineState) -> Result<(), String>
                                     }
                                 }
                             }
-                        // Emit event to webview
-                        let _ = app_clone.emit(&event_type, val);
+                        // Emit event to webview — EXCEPT "preview": its
+                        // payload carries the full base64 image and is
+                        // already delivered through the oneshot invoke
+                        // response; re-emitting doubles the data transfer.
+                        if event_type != "preview" {
+                            let _ = app_clone.emit(&event_type, val);
+                        }
                     }
                 }
             }
@@ -385,8 +390,7 @@ async fn export_csv(
     app: AppHandle,
     state: State<'_, Arc<Mutex<EngineState>>>,
     dir: String,
-) -> Result<String, String> {
-    // The engine holds the scored results — forward the request and let the
+) -> Result<String, String> {    // The engine holds the scored results — forward the request and let the
     // engine write <dir>/scores.csv; the UI gets confirmation via the
     // "export_done" event (or "error" on failure).
     let path = PathBuf::from(&dir).join("scores.csv");
@@ -397,6 +401,32 @@ async fn export_csv(
     let mut guard = state.lock().unwrap();
     send_engine_command(&app, &mut guard, payload)?;
     Ok(path.to_string_lossy().to_string())
+}
+
+/// Secrets (Roboflow API key) live in the OS credential store
+/// (Windows Credential Manager / macOS Keychain) — never in the webview's
+/// plaintext localStorage.
+#[tauri::command]
+async fn secret_get(_app: AppHandle, key: String) -> Result<Option<String>, String> {
+    let entry = keyring::Entry::new("autoculling", &key).map_err(|e| e.to_string())?;
+    match entry.get_password() {
+        Ok(v) => Ok(Some(v)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+async fn secret_set(_app: AppHandle, key: String, value: String) -> Result<(), String> {
+    let entry = keyring::Entry::new("autoculling", &key).map_err(|e| e.to_string())?;
+    if value.is_empty() {
+        match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(e.to_string()),
+        }
+    } else {
+        entry.set_password(&value).map_err(|e| e.to_string())
+    }
 }
 
 fn main() {
@@ -443,7 +473,9 @@ fn main() {
             run,
             cancel,
             preview,
-            export_csv
+            export_csv,
+            secret_get,
+            secret_set
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

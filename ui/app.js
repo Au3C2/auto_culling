@@ -87,17 +87,34 @@
     { id: 'pDryRun', key: 'dry_run', type: 'bool', default: false },
   ];
 
+  // Params persisted through the OS credential store (Rust keyring) instead
+  // of localStorage — plaintext webview storage is extractable from the
+  // profile directory.
+  const SECRET_KEYS = new Set(['rf_api_key']);
+
   function loadSavedParams() {
     PARAMS.forEach((p) => {
       const el = $(p.id);
       if (!el) return;
-      const val = localStorage.getItem(`ac-param-${p.key}`);
-      if (val !== null) {
-        if (p.type === 'bool') el.checked = val === 'true';
-        else el.value = val;
+      if (SECRET_KEYS.has(p.key)) {
+        // Drop any legacy plaintext copy from localStorage.
+        localStorage.removeItem(`ac-param-${p.key}`);
+        invokeTauri('secret_get', { key: p.key }).then((v) => {
+          if (v) el.value = v;
+        }).catch(() => {});
+      } else {
+        const val = localStorage.getItem(`ac-param-${p.key}`);
+        if (val !== null) {
+          if (p.type === 'bool') el.checked = val === 'true';
+          else el.value = val;
+        }
       }
       el.addEventListener('change', () => {
         const currentVal = p.type === 'bool' ? el.checked : el.value;
+        if (SECRET_KEYS.has(p.key)) {
+          invokeTauri('secret_set', { key: p.key, value: String(currentVal) }).catch(() => {});
+          return;
+        }
         localStorage.setItem(`ac-param-${p.key}`, currentVal);
       });
     });
@@ -435,16 +452,25 @@
     return `row-${item.path.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
   }
 
+  // Escape interpolated values before they go through innerHTML — filenames
+  // and engine veto strings are user/external-controlled (CSP is not a
+  // substitute for escaping).
+  function esc(value) {
+    return String(value).replace(/[&<>"']/g, (c) => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+  }
+
   function buildRowHtml(item) {
     const isSelected = state.selectedPhoto && state.selectedPhoto.path === item.path;
-    const ratingDisplay = item.status === 'pending'
+    const ratingDisplay = item.status === 'pending' || item.status === 'decode_failed'
       ? '<span style="color:#475569;">—</span>'
       : item.rating > 0
         ? `<span class="tau-stars">${'★'.repeat(item.rating)}</span>`
         : '<span class="tau-reject-tag">REJECT</span>';
 
     const reasonDisplay = item.veto
-      ? `<span class="tau-veto-desc" title="${item.veto}">${item.veto}</span>`
+      ? `<span class="tau-veto-desc" title="${esc(item.veto)}">${esc(item.veto)}</span>`
       : item.rating > 0
         ? '<span class="tau-pass-tag">PASSED</span>'
         : '—';
@@ -458,12 +484,12 @@
           : item.status));
 
     return `
-      <tr id="${rowIdFor(item)}" data-path="${item.path}" class="${isSelected ? 'selected' : ''}">
-        <td title="${item.name}" style="font-family: var(--tau-font-mono); font-weight: 500;">${item.name}</td>
+      <tr id="${rowIdFor(item)}" data-path="${esc(item.path)}" class="${isSelected ? 'selected' : ''}">
+        <td title="${esc(item.name)}" style="font-family: var(--tau-font-mono); font-weight: 500;">${esc(item.name)}</td>
         <td class="tau-th-num">${ratingDisplay}</td>
-        <td class="tau-th-num" style="font-family: var(--tau-font-mono);">${item.sharp ? item.sharp.toFixed(3) : '—'}</td>
-        <td class="tau-th-num" style="font-family: var(--tau-font-mono);">${item.comp ? item.comp.toFixed(3) : '—'}</td>
-        <td class="tau-th-num" style="font-family: var(--tau-font-mono); font-weight: 600;">${item.raw ? item.raw.toFixed(2) : '—'}</td>
+        <td class="tau-th-num" style="font-family: var(--tau-font-mono);">${Number.isFinite(item.sharp) ? item.sharp.toFixed(3) : '—'}</td>
+        <td class="tau-th-num" style="font-family: var(--tau-font-mono);">${Number.isFinite(item.comp) ? item.comp.toFixed(3) : '—'}</td>
+        <td class="tau-th-num" style="font-family: var(--tau-font-mono); font-weight: 600;">${Number.isFinite(item.raw) ? item.raw.toFixed(2) : '—'}</td>
         <td>${reasonDisplay}</td>
         <td class="tau-th-center" style="font-family: var(--tau-font-mono); font-size: 10px;">${statusDisplay}</td>
       </tr>
