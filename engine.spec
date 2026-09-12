@@ -1,10 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-cull_sidecar.spec — standalone PyInstaller spec for AutoCulling sidecar engine.
+engine.spec — standalone PyInstaller spec for the AutoCulling engine.
 
-Produces a single-file executable `cull_sidecar` (or `cull_sidecar.exe` on Windows)
-with `console=False` so no terminal/console window flashes when spawned by Tauri.
-The executable communicates with the Tauri Rust backend via Stdio JSON Lines.
+Produces `auto_culling_engine` (or `auto_culling_engine.exe` on Windows) with
+`console=False` so no terminal/console window flashes when spawned by the Tauri
+GUI. The executable communicates with the Tauri Rust backend via Stdio JSON Lines.
 """
 
 import os
@@ -90,21 +90,26 @@ a = Analysis(
 pyz = PYZ(a.pure, a.zipped_data, cipher=None)
 
 if onedir:
-    # Two entry points sharing ONE _internal tree (zero duplicated deps):
-    #   - cull_sidecar     : windowed bootloader — spawned by Tauri (no console flash)
-    #   - auto_culling_cli : console bootloader — user-facing CLI (stdout to terminal)
+    # Two entry points sharing ONE dependency tree (zero duplicated deps),
+    # all dependencies collected into `lib/` (PyInstaller default is
+    # `_internal`; `lib` is the conventional name for bundled app deps).
+    # Install layout is FLAT: engine + CLI bootloaders sit at the bundle
+    # root next to `lib/`.
+    #   - auto_culling_engine : windowed bootloader — spawned by the Tauri GUI
+    #   - auto_culling_cli    : console bootloader — user-facing CLI (stdout to terminal)
     exe = EXE(
         pyz,
         a.scripts,
         [],
         exclude_binaries=True,
-        name="cull_sidecar",
+        name="auto_culling_engine",
         debug=False,
         bootloader_ignore_signals=False,
         strip=False,
         upx=False,
         upx_exclude=[],
         runtime_tmpdir=None,
+        contents_directory="lib",
         console=False,
         disable_windowed_traceback=False,
         argv_emulation=False,
@@ -124,6 +129,7 @@ if onedir:
         upx=False,
         upx_exclude=[],
         runtime_tmpdir=None,
+        contents_directory="lib",
         console=True,  # Console subsystem so CLI stdout attaches to the terminal
         disable_windowed_traceback=False,
         argv_emulation=False,
@@ -140,7 +146,7 @@ if onedir:
         [],
         upx=False,
         upx_exclude=[],
-        name="cull_sidecar",
+        name="engine",
     )
 else:
     exe = EXE(
@@ -150,7 +156,7 @@ else:
         a.zipfiles,
         a.datas,
         [],
-        name="cull_sidecar",
+        name="auto_culling_engine",
         debug=False,
         bootloader_ignore_signals=False,
         strip=False,
