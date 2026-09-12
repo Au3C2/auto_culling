@@ -29,9 +29,11 @@ def _cull_command(tmp: str, csv_path: str, workers: int) -> list[str]:
     exe = os.environ.get("CULL_EXE")
     if exe:
         return [exe, "--input-dir", tmp, "--workers", str(workers), "--force",
+                "--p4-policy", "always",
                 "--dry-run", "--dump-scores", str(csv_path)]
     return [sys.executable, "cull_photos.py",
             "--input-dir", tmp, "--workers", str(workers), "--force",
+            "--p4-policy", "always",
             "--dry-run", "--dump-scores", str(csv_path)]
 
 

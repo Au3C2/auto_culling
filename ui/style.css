@@ -1,0 +1,1187 @@
+/**
+ * Taubyte / Tau Inspired Design System Stylesheet
+ * 
+ * Aesthetic: Obsidian Deep Space Canvas, Neon Accents, Ultra-Crisp High-DPI Lines,
+ * Frosted Glassmorphism, Sophisticated Developer-Centric Typography & Micro-Interactions.
+ */
+
+:root {
+  /* Canvas & Base Layers */
+  --tau-bg-canvas: #07090e;
+  --tau-bg-surface-1: #0e1117;
+  --tau-bg-surface-2: #141820;
+  --tau-bg-surface-3: #1a202c;
+  --tau-bg-hover: #1e2638;
+  --tau-bg-selected: rgba(0, 229, 255, 0.08);
+  --tau-bg-input: #0a0d13;
+
+  /* Neon & Brand Accents */
+  --tau-accent-green: #00e676;
+  --tau-accent-green-glow: rgba(0, 230, 118, 0.4);
+  --tau-accent-cyan: #00e5ff;
+  --tau-accent-cyan-glow: rgba(0, 229, 255, 0.35);
+  --tau-accent-blue: #3b82f6;
+  --tau-accent-violet: #8b5cf6;
+  --tau-accent-red: #ff3366;
+  --tau-accent-red-glow: rgba(255, 51, 102, 0.4);
+  --tau-accent-gold: #fbbf24;
+
+  /* Borders & Glass */
+  --tau-border-subtle: rgba(255, 255, 255, 0.07);
+  --tau-border-medium: rgba(255, 255, 255, 0.12);
+  --tau-border-focus: var(--tau-accent-cyan);
+  --tau-inner-glow: inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+
+  /* Typography Colors */
+  --tau-text-primary: #f8fafc;
+  --tau-text-secondary: #94a3b8;
+  --tau-text-muted: #64748b;
+  --tau-text-dim: #475569;
+
+  /* Font Families */
+  --tau-font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --tau-font-mono: "JetBrains Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+
+  /* Layout Constants */
+  --table-width: 50%;
+}
+
+/* Reset & Global */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--tau-bg-canvas);
+  color: var(--tau-text-primary);
+  font-family: var(--tau-font-sans);
+  font-size: 12.5px;
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+  height: 100vh;
+  overflow: hidden;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.tau-app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: radial-gradient(circle at 50% 0%, #101624 0%, var(--tau-bg-canvas) 70%);
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* ==========================================================================
+   Topbar Header
+   ========================================================================== */
+.tau-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: rgba(14, 17, 23, 0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--tau-border-subtle);
+  flex-shrink: 0;
+  box-shadow: var(--tau-inner-glow);
+}
+
+.tau-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tau-logo-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 229, 255, 0.08);
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.tau-pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--tau-accent-green);
+  box-shadow: 0 0 8px var(--tau-accent-green-glow);
+  animation: pulseGlow 2s infinite ease-in-out;
+}
+
+.tau-dot-cyan {
+  background-color: var(--tau-accent-cyan);
+  box-shadow: 0 0 8px var(--tau-accent-cyan-glow);
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+.tau-logo-text {
+  font-family: var(--tau-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--tau-accent-cyan);
+}
+
+.tau-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--tau-font-mono);
+  font-size: 11.5px;
+  color: var(--tau-text-muted);
+}
+
+.tau-bc-sep {
+  color: var(--tau-text-dim);
+}
+
+.tau-bc-item.active {
+  color: var(--tau-text-secondary);
+  font-weight: 500;
+}
+
+/* Directory Box */
+.tau-dir-box {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  background: var(--tau-bg-input);
+  border: 1px solid var(--tau-border-subtle);
+  border-radius: 8px;
+  padding: 2px 6px 2px 10px;
+  gap: 8px;
+  transition: all 0.2s ease;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.tau-dir-box:focus-within {
+  border-color: var(--tau-border-focus);
+  box-shadow: 0 0 0 2px rgba(0, 229, 255, 0.15), inset 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.tau-input-icon {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.tau-dir-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--tau-text-primary);
+  font-family: var(--tau-font-mono);
+  font-size: 12px;
+  padding: 4px 0;
+  text-align: left;
+}
+
+.tau-dir-input::placeholder {
+  color: var(--tau-text-dim);
+  text-align: left;
+}
+
+.tau-kbd {
+  font-family: var(--tau-font-mono);
+  font-size: 9.5px;
+  padding: 1px 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  color: var(--tau-text-muted);
+  margin-left: 4px;
+}
+
+/* Actions */
+.tau-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Buttons */
+.tau-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 6px;
+  font-family: var(--tau-font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.tau-btn .tau-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  font-size: 13px;
+}
+
+.tau-btn-primary {
+  background: transparent;
+  border: 1px solid var(--tau-border-medium);
+  color: var(--tau-text-primary);
+  font-weight: 500;
+  box-shadow: none;
+}
+
+.tau-btn-primary:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: var(--tau-text-primary);
+  box-shadow: none;
+  transform: none;
+}
+
+.tau-btn-secondary {
+  background: var(--tau-bg-surface-2);
+  border-color: var(--tau-border-subtle);
+  color: var(--tau-text-primary);
+  height: 28px;
+  padding: 0 10px;
+}
+
+.tau-btn-secondary:not(:disabled):hover {
+  background: var(--tau-bg-surface-3);
+  border-color: var(--tau-border-medium);
+}
+
+.tau-btn-glass {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--tau-border-subtle);
+  color: var(--tau-text-secondary);
+  height: 32px;
+  padding: 0 14px;
+}
+
+.tau-btn-glass:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--tau-text-primary);
+  border-color: var(--tau-border-medium);
+}
+
+.tau-btn-icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--tau-border-subtle);
+  color: var(--tau-text-muted);
+}
+
+.tau-btn-icon:hover {
+  color: var(--tau-text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tau-btn-cancel {
+  background: rgba(255, 51, 102, 0.15) !important;
+  border-color: rgba(255, 51, 102, 0.4) !important;
+  color: #ff3366 !important;
+  box-shadow: 0 0 12px var(--tau-accent-red-glow);
+}
+
+.tau-btn-cancel:hover {
+  background: rgba(255, 51, 102, 0.25) !important;
+}
+
+/* ==========================================================================
+   Configuration Panel (3-Column Cyber Grid)
+   ========================================================================== */
+.tau-config-panel {
+  padding: 8px 16px 10px;
+  background: rgba(14, 17, 23, 0.6);
+  border-bottom: 1px solid var(--tau-border-subtle);
+  flex-shrink: 0;
+}
+
+.tau-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.tau-tag-pill {
+  font-family: var(--tau-font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(0, 229, 255, 0.1);
+  color: var(--tau-accent-cyan);
+  border: 1px solid rgba(0, 229, 255, 0.2);
+}
+
+.tau-panel-subtitle {
+  font-size: 11px;
+  color: var(--tau-text-muted);
+  margin-left: 6px;
+}
+
+.tau-params-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.tau-card {
+  background: var(--tau-bg-surface-1);
+  border: 1px solid var(--tau-border-subtle);
+  border-radius: 8px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  box-shadow: var(--tau-inner-glow), 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.tau-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  padding-bottom: 4px;
+  margin-bottom: 2px;
+}
+
+.tau-card-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--tau-text-primary);
+}
+
+.tau-card-tag {
+  font-family: var(--tau-font-mono);
+  font-size: 9px;
+  color: var(--tau-text-dim);
+  letter-spacing: 0.05em;
+}
+
+.tau-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tau-field-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+
+.tau-label {
+  font-size: 11.5px;
+  color: var(--tau-text-secondary);
+}
+
+.tau-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  background: var(--tau-bg-input);
+  border: 1px solid var(--tau-border-subtle);
+  border-radius: 5px;
+  transition: all 0.15s ease;
+}
+
+.tau-input-wrap:focus-within {
+  border-color: var(--tau-border-focus);
+  box-shadow: 0 0 0 1px rgba(0, 229, 255, 0.2);
+}
+
+.tau-input {
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: var(--tau-text-primary);
+  font-family: var(--tau-font-mono);
+  font-size: 11.5px;
+  padding: 3px 2px 3px 8px;
+  outline: none;
+  width: 65px;
+  text-align: right;
+  -moz-appearance: textfield;
+}
+
+/* Hide native number spinners */
+.tau-input::-webkit-outer-spin-button,
+.tau-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.tau-input:focus {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.tau-unit {
+  padding: 0 8px 0 3px;
+  font-size: 10px;
+  font-family: var(--tau-font-mono);
+  color: var(--tau-text-dim);
+  pointer-events: none;
+}
+
+.tau-select {
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--tau-bg-input);
+  background-image:
+    linear-gradient(45deg, transparent 50%, #64748b 50%),
+    linear-gradient(135deg, #64748b 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+  border: 1px solid var(--tau-border-subtle);
+  border-radius: 5px;
+  color: var(--tau-text-secondary);
+  font-family: var(--tau-font-mono);
+  font-size: 11px;
+  padding: 4px 22px 4px 8px;
+  outline: none;
+  width: 140px;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.tau-select option {
+  background: #141820;
+  color: var(--tau-text-primary);
+}
+
+.tau-select:focus {
+  border-color: var(--tau-border-medium);
+  color: var(--tau-text-primary);
+  box-shadow: none;
+}
+
+.tau-rf-wrap {
+  width: 140px;
+}
+
+.tau-rf-input {
+  width: 100% !important;
+  text-align: left !important;
+  padding: 3px 8px !important;
+}
+
+.tau-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 3px;
+}
+
+.tau-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+.tau-checkbox {
+  display: none;
+}
+
+.tau-toggle-custom {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid var(--tau-border-medium);
+  background: var(--tau-bg-input);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.tau-checkbox:checked + .tau-toggle-custom {
+  background: var(--tau-accent-cyan);
+  border-color: var(--tau-accent-cyan);
+  box-shadow: 0 0 6px var(--tau-accent-cyan-glow);
+}
+
+.tau-toggle-text {
+  font-size: 11px;
+  color: var(--tau-text-secondary);
+}
+
+/* Tooltip */
+.tau-tip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: help;
+}
+
+.tau-info-icon {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--tau-text-muted);
+  font-family: var(--tau-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.tau-tip-wrap:hover .tau-info-icon {
+  background: var(--tau-accent-cyan);
+  color: #000;
+  border-color: var(--tau-accent-cyan);
+  box-shadow: 0 0 8px var(--tau-accent-cyan-glow);
+}
+
+.tau-tooltip {
+  display: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2000;
+  width: 250px;
+  background: #0d1117;
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  border-radius: 8px;
+  padding: 8px 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.75), 0 0 12px rgba(0, 229, 255, 0.1);
+  pointer-events: none;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--tau-text-secondary);
+}
+
+/* Edge avoidance: left column aligns to left, right column aligns to right */
+.tau-card:first-child .tau-tooltip {
+  left: -8px;
+  right: auto;
+  transform: none;
+}
+
+.tau-card:last-child .tau-tooltip {
+  left: auto;
+  right: -8px;
+  transform: none;
+}
+
+.tau-tip-wrap:hover .tau-tooltip {
+  display: block;
+}
+
+.tau-tt-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding-bottom: 3px;
+}
+
+.tau-tt-title {
+  font-weight: 600;
+  color: var(--tau-text-primary);
+  font-size: 11.5px;
+}
+
+.tau-tt-badge {
+  font-family: var(--tau-font-mono);
+  font-size: 9px;
+  color: var(--tau-accent-gold);
+  background: rgba(251, 191, 36, 0.1);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.tau-tt-desc {
+  margin-bottom: 4px;
+}
+
+.tau-tt-meta {
+  font-family: var(--tau-font-mono);
+  font-size: 10px;
+  color: var(--tau-text-muted);
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+  padding-top: 4px;
+}
+
+.tau-tt-label {
+  color: var(--tau-accent-cyan);
+}
+
+/* ==========================================================================
+   Telemetry & Progress Bar
+   ========================================================================== */
+.tau-telemetry-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 16px;
+  background: var(--tau-bg-surface-1);
+  border-bottom: 1px solid var(--tau-border-subtle);
+  flex-shrink: 0;
+}
+
+.tau-telemetry-left, .tau-telemetry-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tau-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--tau-border-subtle);
+  padding: 2px 7px;
+  border-radius: 5px;
+}
+
+.tau-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tau-accent-cyan);
+  box-shadow: 0 0 6px var(--tau-accent-cyan-glow);
+}
+
+.tau-badge-text {
+  font-family: var(--tau-font-mono);
+  font-size: 11px;
+  color: var(--tau-text-primary);
+  font-weight: 500;
+}
+
+.tau-stat-pill {
+  font-family: var(--tau-font-mono);
+  font-size: 11px;
+  color: var(--tau-text-secondary);
+  background: var(--tau-bg-input);
+  border: 1px solid var(--tau-border-subtle);
+  padding: 2px 8px;
+  border-radius: 5px;
+}
+
+.tau-stat-label {
+  color: var(--tau-text-muted);
+}
+
+.tau-stat-val {
+  color: var(--tau-accent-green);
+  font-weight: 600;
+}
+
+.tau-stat-sep {
+  color: var(--tau-text-dim);
+  margin: 0 3px;
+}
+
+.tau-frame-stat {
+  font-family: var(--tau-font-mono);
+  font-size: 11px;
+  color: var(--tau-text-muted);
+}
+
+.tau-filter-tabs {
+  display: flex;
+  background: var(--tau-bg-input);
+  border: 1px solid var(--tau-border-subtle);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.tau-tab {
+  background: transparent;
+  border: none;
+  color: var(--tau-text-muted);
+  font-family: var(--tau-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tau-tab:hover {
+  color: var(--tau-text-primary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.tau-tab.active {
+  color: var(--tau-text-primary);
+  background: var(--tau-bg-surface-3);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.tau-tab-keep.active {
+  color: var(--tau-accent-green);
+}
+
+.tau-tab-reject.active {
+  color: var(--tau-accent-red);
+}
+
+/* Progress Track */
+.tau-progress-track {
+  width: 100%;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.tau-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--tau-accent-cyan), var(--tau-accent-green));
+  box-shadow: 0 0 8px var(--tau-accent-cyan-glow);
+  transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ==========================================================================
+   Workspace Splitter Pane
+   ========================================================================== */
+.tau-workspace {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.tau-table-pane {
+  flex: 0 0 var(--table-width, 50%);
+  min-width: 280px;
+  max-width: calc(100% - 280px);
+  display: flex;
+  flex-direction: column;
+  background: var(--tau-bg-canvas);
+}
+
+.tau-table-container {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+
+.tau-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+  table-layout: auto;
+}
+
+.tau-table th, .tau-table td {
+  padding: 5px 8px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tau-table th {
+  background: var(--tau-bg-surface-1);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  font-family: var(--tau-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--tau-text-muted);
+  border-bottom: 1px solid var(--tau-border-subtle);
+}
+
+.tau-table th.sortable {
+  cursor: pointer;
+}
+
+.tau-table th.sortable:hover {
+  color: var(--tau-accent-cyan);
+  background: var(--tau-bg-surface-2);
+}
+
+.tau-table th:first-child,
+.tau-table td:first-child {
+  width: 32%;
+  min-width: 160px;
+  max-width: 320px;
+}
+
+.tau-table th:nth-child(6),
+.tau-table td:nth-child(6) {
+  min-width: 120px;
+}
+
+.tau-sort-icon {
+  font-size: 9px;
+  opacity: 0.5;
+}
+
+.tau-th-num {
+  text-align: right !important;
+}
+
+.tau-th-center {
+  text-align: center !important;
+}
+
+.tau-table tr {
+  transition: background 0.1s ease;
+}
+
+.tau-table tr:hover {
+  background: var(--tau-bg-hover);
+}
+
+.tau-table tr.selected {
+  background: var(--tau-bg-selected) !important;
+  border-left: 2px solid var(--tau-accent-cyan);
+}
+
+.tau-table tr.flash {
+  animation: rowFlash 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes rowFlash {
+  0% { background: rgba(0, 229, 255, 0.25); }
+  100% { background: transparent; }
+}
+
+.tau-empty-row td {
+  padding: 50px 10px;
+  text-align: center;
+}
+
+.tau-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: var(--tau-text-muted);
+}
+
+.tau-empty-icon {
+  font-size: 24px;
+  opacity: 0.5;
+}
+
+/* Stars & Badges */
+.tau-stars {
+  color: var(--tau-accent-gold);
+  font-family: var(--tau-font-mono);
+  letter-spacing: 1px;
+}
+
+.tau-reject-tag {
+  display: inline-block;
+  font-family: var(--tau-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--tau-accent-red);
+  background: rgba(255, 51, 102, 0.1);
+  border: 1px solid rgba(255, 51, 102, 0.25);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.tau-pass-tag {
+  display: inline-block;
+  font-family: var(--tau-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--tau-accent-green);
+  background: rgba(0, 230, 118, 0.1);
+  border: 1px solid rgba(0, 230, 118, 0.25);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.tau-veto-desc {
+  display: inline-block;
+  font-family: var(--tau-font-mono);
+  font-size: 10.5px;
+  color: var(--tau-text-muted);
+}
+
+/* Resizer Splitter */
+.tau-resizer {
+  width: 6px;
+  background: var(--tau-bg-surface-1);
+  border-left: 1px solid var(--tau-border-subtle);
+  border-right: 1px solid var(--tau-border-subtle);
+  cursor: col-resize;
+  transition: all 0.15s ease;
+  position: relative;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tau-resizer-line {
+  width: 2px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 1px;
+}
+
+.tau-resizer:hover, .tau-resizer.dragging {
+  background: var(--tau-accent-cyan);
+  border-color: var(--tau-accent-cyan);
+  box-shadow: 0 0 10px var(--tau-accent-cyan-glow);
+}
+
+.tau-resizer:hover .tau-resizer-line,
+.tau-resizer.dragging .tau-resizer-line {
+  background: #000;
+}
+
+/* Preview Pane */
+.tau-preview-pane {
+  flex: 1 1 0;
+  min-width: 280px;
+  background: var(--tau-bg-canvas);
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+}
+
+.tau-preview-card {
+  background: var(--tau-bg-surface-1);
+  border: 1px solid var(--tau-border-subtle);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  box-shadow: var(--tau-inner-glow), 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.tau-preview-header {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--tau-border-subtle);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background: rgba(14, 17, 23, 0.7);
+  min-width: 0;
+}
+
+.tau-ph-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.tau-ph-badge {
+  font-family: var(--tau-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--tau-accent-violet);
+  background: rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.tau-ph-title {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--tau-text-primary);
+  font-family: var(--tau-font-mono);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tau-ph-meta {
+  font-family: var(--tau-font-mono);
+  font-size: 10.5px;
+  color: var(--tau-text-muted);
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.tau-preview-body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #050608;
+  overflow: hidden;
+  position: relative;
+  padding: 8px;
+}
+
+.tau-preview-body img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.tau-preview-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  position: relative;
+  z-index: 2;
+}
+
+.tau-grid-backdrop {
+  position: absolute;
+  inset: 0;
+  background-image: 
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 24px 24px;
+  opacity: 0.8;
+}
+
+.tau-empty-symbol {
+  font-size: 28px;
+  color: var(--tau-accent-cyan);
+  opacity: 0.4;
+  text-shadow: 0 0 12px var(--tau-accent-cyan-glow);
+}
+
+.tau-empty-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tau-text-secondary);
+}
+
+.tau-empty-desc {
+  font-size: 11px;
+  color: var(--tau-text-muted);
+  max-width: 220px;
+}
+
+.tau-preview-footer {
+  padding: 6px 10px;
+  border-top: 1px solid var(--tau-border-subtle);
+  background: var(--tau-bg-surface-1);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tau-chip {
+  font-family: var(--tau-font-mono);
+  font-size: 10.5px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--tau-bg-surface-2);
+  border: 1px solid var(--tau-border-subtle);
+}
+
+.tau-chip-gold { color: var(--tau-accent-gold); border-color: rgba(251, 191, 36, 0.2); }
+.tau-chip-cyan { color: var(--tau-accent-cyan); border-color: rgba(0, 229, 255, 0.2); }
+.tau-chip-blue { color: var(--tau-accent-blue); border-color: rgba(59, 130, 246, 0.2); }
+.tau-chip-violet { color: var(--tau-accent-violet); border-color: rgba(139, 92, 246, 0.2); }
+.tau-chip-muted { color: var(--tau-text-muted); }
+
+/* Log Drawer */
+.tau-log-drawer {
+  height: 140px;
+  background: #050608;
+  border-top: 1px solid var(--tau-border-subtle);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.tau-log-header {
+  padding: 4px 12px;
+  background: var(--tau-bg-surface-1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tau-lh-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--tau-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--tau-text-muted);
+}
+
+.tau-log-console {
+  flex: 1;
+  padding: 6px 12px;
+  overflow-y: auto;
+  font-family: var(--tau-font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  color: #a4b0be;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

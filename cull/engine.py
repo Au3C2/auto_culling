@@ -23,8 +23,40 @@ from cull.xmp_writer import write_xmp_batch
 from cull.xmp_reader import read_xmp_rating
 from cull.cropper import calculate_crop
 from cull.renamer import rename_images
+import threading
 
 log = logging.getLogger(__name__)
+
+# Standardized frame log line for protocol and CLI consistency
+FRAME_LOG_FMT = "  [%s]  sharp=%.3f  comp=%.3f  raw=%.2f  Rating=%+d%s"
+
+
+def dedupe_raw_cooked(image_paths: list[Path]) -> tuple[list[Path], set[Path]]:
+    """Collapse RAW/cooked pairs (same stem) onto the cooked file.
+
+    Returns the deduplicated, sorted shot list plus the subset of cooked
+    files that have no RAW sibling (metadata sync target).
+    """
+    stems: dict[str, Path] = {}
+    has_raw: dict[str, bool] = {}
+    for p in image_paths:
+        stem = p.stem.lower()
+        ext = p.suffix.lower()
+        if ext in RAW_EXTS:
+            has_raw[stem] = True
+        if stem not in stems:
+            stems[stem] = p
+        else:
+            prev = stems[stem]
+            if ext in COOKED_EXTS and prev.suffix.lower() in RAW_EXTS:
+                stems[stem] = p
+
+    unique = sorted(stems.values())
+    standalone = {
+        p for stem, p in stems.items()
+        if p.suffix.lower() in COOKED_EXTS and not has_raw.get(stem)
+    }
+    return unique, standalone
 
 @dataclass
 class EngineConfig:
@@ -51,6 +83,9 @@ class EngineConfig:
     label_check: bool = False
     label_check_dir: Path | None = None
     deterministic: bool = False
+    # GUI mode: frame log lines carry the full path so protocol events can
+    # key photos unambiguously (duplicate basenames across recursive dirs).
+    log_full_paths: bool = False
 
 class CullingEngine:
     """
@@ -62,12 +97,17 @@ class CullingEngine:
         self.exif_map: dict[Path, ExifData] = {}
         self.groups: list[BurstGroup] = []
         self.all_scores: list[ImageScore] = []
+        # Frames skipped because decoding failed (kept out of all_scores on
+        # purpose; surfaced separately so GUI totals stay consistent).
+        self.failed_count: int = 0
+        self._failed_lock = threading.Lock()
         self.f1_model = None
         self.coco_model = None
         self.cloud_f1 = None
         self.standalone_cooked: set[Path] = set()
 
-    def scan(self, progress_callback: Callable[[str, float], None] | None = None):
+    def scan(self, progress_callback: Callable[[str, float], None] | None = None,
+             cancel_event: threading.Event | None = None):
         """Scan input directory and group bursts."""
         if progress_callback:
             progress_callback("Collecting images...", 0.1)
@@ -76,32 +116,25 @@ class CullingEngine:
         self.image_paths = self._collect_images(self.config.input_dir, self.config.recursive)
         log.info("Found %d raw image files", len(self.image_paths))
         
+        if cancel_event and cancel_event.is_set():
+            return
+
         if self.config.rename:
             if progress_callback:
                 progress_callback("Renaming images...", 0.2)
             new_map = rename_images(self.image_paths, dry_run=self.config.dry_run)
             self.image_paths = sorted(list(new_map.values()))
 
+        if cancel_event and cancel_event.is_set():
+            return
+
         # 2. Prioritize JPG/HIF over RAW
-        stems: dict[str, Path] = {}
-        has_raw: dict[str, bool] = {}
-        for p in self.image_paths:
-            stem = p.stem.lower()
-            ext = p.suffix.lower()
-            if ext in RAW_EXTS:
-                has_raw[stem] = True
-            if stem not in stems:
-                stems[stem] = p
-            else:
-                prev = stems[stem]
-                if ext in COOKED_EXTS and prev.suffix.lower() in RAW_EXTS:
-                    stems[stem] = p
-        
-        self.image_paths = sorted(stems.values())
-        self.standalone_cooked = {p for stem, p in stems.items() 
-                                  if p.suffix.lower() in COOKED_EXTS and not has_raw.get(stem)}
+        self.image_paths, self.standalone_cooked = dedupe_raw_cooked(self.image_paths)
         
         log.info("Processing %d unique shots", len(self.image_paths))
+
+        if cancel_event and cancel_event.is_set():
+            return
 
         # 3. Read EXIF & Grouping
         if progress_callback:
@@ -109,13 +142,25 @@ class CullingEngine:
         exif_list = read_exif(self.image_paths)
         self.exif_map = {e.path: e for e in exif_list}
         
+        if cancel_event and cancel_event.is_set():
+            return
+
         if progress_callback:
             progress_callback("Grouping burst sequences...", 0.6)
         self.groups = group_bursts(exif_list)
         log.info("Grouped into %d burst groups", len(self.groups))
 
-    def load_models(self, progress_callback: Callable[[str, float], None] | None = None):
+    @staticmethod
+    def collect_shots(input_dir: Path, recursive: bool = False) -> tuple[list[Path], set[Path]]:
+        """Collect supported images and deduplicate RAW/cooked pairs."""
+        found = CullingEngine._collect_images(input_dir, recursive)
+        return dedupe_raw_cooked(found)
+
+    def load_models(self, progress_callback: Callable[[str, float], None] | None = None,
+                    cancel_event: threading.Event | None = None):
         """Load detection models."""
+        if cancel_event and cancel_event.is_set():
+            return
         if progress_callback:
             progress_callback("Loading models...", 0.8)
             
@@ -163,17 +208,29 @@ class CullingEngine:
         if bundle is not None:
             self._bundle_queue.put(bundle)
 
-    def run(self, progress_callback: Callable[[str, float], None] | None = None):
-        """Execute the culling process."""
+    def run(self, progress_callback: Callable[[str, float], None] | None = None,
+            cancel_event: threading.Event | None = None):
+        """Execute the culling process.
+
+        If *cancel_event* is provided, its flag is checked between frames;
+        once set, scoring stops early, side effects (XMP writes / metadata
+        sync) are skipped, and the partial scores collected so far are
+        returned.
+        """
         # scan() (walk + EXIF + grouping) and load_models() (CoreML session
         # init) are data-independent; run concurrently to hide the ~1.1s model
         # load behind the EXIF/directory scan.
         from concurrent.futures import ThreadPoolExecutor as _TPE
         with _TPE(max_workers=2) as _setup_pool:
-            _f_scan = _setup_pool.submit(self.scan, progress_callback)
-            _f_models = _setup_pool.submit(self.load_models, progress_callback)
+            _f_scan = _setup_pool.submit(self.scan, progress_callback, cancel_event=cancel_event)
+            _f_models = _setup_pool.submit(self.load_models, progress_callback, cancel_event=cancel_event)
             _f_scan.result()
             _f_models.result()
+
+        if cancel_event and cancel_event.is_set():
+            if progress_callback:
+                progress_callback("Cancelled", 0.0)
+            return [], 0.0
 
         if progress_callback:
             progress_callback("Analyzing images...", 0.9)
@@ -193,6 +250,8 @@ class CullingEngine:
             if n_consumers > 1 and self.cloud_f1 is None:
                 def _score_job(job):
                     idx, group, futs = job
+                    if cancel_event and cancel_event.is_set():
+                        return []
                     bundle = self._acquire_bundle()
                     try:
                         f1, coco, p4 = bundle
@@ -201,7 +260,8 @@ class CullingEngine:
                             return futs[i].result()
 
                         res = self._process_group_internal(
-                            group, decode_loader=_decode_loader, f1=f1, coco=coco, p4=p4)
+                            group, decode_loader=_decode_loader, f1=f1, coco=coco, p4=p4,
+                            cancel_event=cancel_event)
                     finally:
                         self._release_bundle(bundle)
                     for s in res:
@@ -243,6 +303,8 @@ class CullingEngine:
                     submitted_idx += 1
 
                 for idx, group in enumerate(self.groups, start=1):
+                    if cancel_event and cancel_event.is_set():
+                        break
                     log.info("Processing Group %d/%d (%d frames)", idx, len(self.groups), len(group.frames))
 
                     def _decode_loader(i: int) -> np.ndarray | None:
@@ -254,7 +316,8 @@ class CullingEngine:
                             submitted_idx += 1
                         return fut.result()
 
-                    res = self._process_group_internal(group, decode_loader=_decode_loader)
+                    res = self._process_group_internal(group, decode_loader=_decode_loader,
+                                                       cancel_event=cancel_event)
                     for s in res:
                         s.burst_group = idx
                     group_results.append(res)
@@ -264,6 +327,12 @@ class CullingEngine:
             self.all_scores.extend(res)
 
         elapsed = time.perf_counter() - t_start
+
+        if cancel_event and cancel_event.is_set():
+            log.info("Cancelled after scoring %d/%d frames", len(self.all_scores), len(self.image_paths))
+            if progress_callback:
+                progress_callback("Cancelled", 0.0)
+            return self.all_scores, elapsed
         
         if progress_callback:
             progress_callback("Saving metadata...", 0.95)
@@ -288,7 +357,8 @@ class CullingEngine:
 
     def _process_group_internal(self, group: BurstGroup,
                                 decode_loader: Callable[[int], np.ndarray | None] | None = None,
-                                f1=None, coco=None, p4=None) -> list[ImageScore]:
+                                f1=None, coco=None, p4=None,
+                                cancel_event: threading.Event | None = None) -> list[ImageScore]:
         """Core logic for processing a single burst group.
 
         *decode_loader* optionally provides pre-decoded frames by index from
@@ -309,6 +379,10 @@ class CullingEngine:
             check_p4 = any(k in dir_name for k in keywords) and "sprint_quali" not in dir_name
 
         for frame_idx, frame_path in enumerate(frames):
+            label = str(frame_path) if self.config.log_full_paths else frame_path.name
+            if cancel_event and cancel_event.is_set():
+                log.info("Cancel requested; stopping group %s early", group.group_id)
+                break
             # Check for existing culling status
             xmp_rating, xmp_pick = read_xmp_rating(frame_path)
             exif = self.exif_map.get(frame_path)
@@ -321,18 +395,30 @@ class CullingEngine:
             if not self.config.force and (is_rating_set or is_pick_set):
                 if not is_rating_set:
                     final_rating = 1 if final_pick == 1 else (-1 if final_pick == -1 else 0)
-                scores.append(ImageScore(
-                    path=frame_path, s_sharp=1.0, s_comp=1.0, 
+                manual_score = ImageScore(
+                    path=frame_path, s_sharp=1.0, s_comp=1.0,
                     raw_score=10.0 if final_rating > 0 else 0.0,
-                    rating=final_rating, vetoed=(final_rating == -1), 
+                    rating=final_rating, vetoed=(final_rating == -1),
                     veto_reason="manual_metadata", is_manual=True
-                ))
+                )
+                scores.append(manual_score)
+                log.info(
+                    FRAME_LOG_FMT, label, manual_score.s_sharp,
+                    manual_score.s_comp, manual_score.raw_score, manual_score.rating,
+                    "  (manual_metadata)"
+                )
                 continue
 
             # Load image (from the process pool when available, else inline)
             img_rgb = decode_loader(frame_idx) if decode_loader is not None else \
                 load_image_rgb(frame_path, scale_width=self.config.scale_width)
             if img_rgb is None:
+                with self._failed_lock:
+                    self.failed_count += 1
+                log.info(
+                    FRAME_LOG_FMT, label, 0.0, 0.0, 0.0, 0,
+                    "  (decode_failed)"
+                )
                 continue
 
 
@@ -364,13 +450,24 @@ class CullingEngine:
             
             log.info(
                 "  [%s]  sharp=%.3f  comp=%.3f  raw=%.2f  Rating=%+d%s",
-                frame_path.name, s_sharp, s_comp, img_score.raw_score,
+                label, s_sharp, s_comp, img_score.raw_score,
                 img_score.rating, f"  ({img_score.veto_reason})" if img_score.vetoed else ""
             )
 
             prev_detections = detections if detections else None
 
+        # Top-N selection mutates ratings in place; the GUI already received
+        # the pre-Top-N frame events, so re-emit only the frames whose final
+        # rating differs (the protocol marks them "(topn_final)").
+        pre_ratings = {s.path: s.rating for s in scores}
         select_best_n(scores, top_n=self.config.top_n)
+        for s in scores:
+            if s.rating != pre_ratings.get(s.path):
+                label = str(s.path) if self.config.log_full_paths else s.path.name
+                log.info(
+                    FRAME_LOG_FMT, label, s.s_sharp, s.s_comp, s.raw_score,
+                    s.rating, "  (topn_final)"
+                )
         
         if self.config.autocrop:
             for s in scores:
@@ -381,7 +478,8 @@ class CullingEngine:
                         s.crop = calculate_crop(d.x1/s.img_w, d.y1/s.img_h, d.x2/s.img_w, d.y2/s.img_h, img_ar=s.img_w/s.img_h)
         return scores
 
-    def _collect_images(self, input_dir: Path, recursive: bool) -> list[Path]:
+    @staticmethod
+    def _collect_images(input_dir: Path, recursive: bool = False) -> list[Path]:
         """Scan *input_dir* for supported image files, sorted by name."""
         import os
         found: list[Path] = []

@@ -142,11 +142,15 @@ def _run_exiftool(paths: list[Path]) -> list[dict]:
             from concurrent.futures import ThreadPoolExecutor
             nproc = max(1, min(4, (os.cpu_count() or 1) // 2))
             chunks = [paths[i::nproc] for i in range(nproc)]
+            extra_kwargs: dict = {"stdin": subprocess.DEVNULL}
+            if sys.platform == "win32":
+                extra_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 
             def _run_shard(shard: list[Path]) -> list[dict]:
                 result = subprocess.run(
                     [*args, *[str(p) for p in shard]],
                     capture_output=True, text=True, check=True,
+                    **extra_kwargs,
                 )
                 return json.loads(result.stdout)
 
@@ -161,6 +165,9 @@ def _run_exiftool(paths: list[Path]) -> list[dict]:
 
     # Build newline-separated file list for stdin
     file_list = "\n".join(str(p) for p in paths) + "\n"
+    fb_kwargs: dict = {}
+    if sys.platform == "win32":
+        fb_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 
     try:
         result = subprocess.run(
@@ -169,6 +176,7 @@ def _run_exiftool(paths: list[Path]) -> list[dict]:
             capture_output=True,
             text=True,
             check=True,
+            **fb_kwargs,
         )
     except FileNotFoundError:
         raise RuntimeError(
@@ -178,12 +186,15 @@ def _run_exiftool(paths: list[Path]) -> list[dict]:
             "  Windows:        https://exiftool.org/"
         )
     except subprocess.CalledProcessError as exc:
-        # exiftool was FOUND and ran but exited non-zero: broken install or
-        # broken bundle. Returning [] here would silently degrade burst
-        # grouping to mtime heuristics and corrupt scores while every gate
-        # keeps passing (2026-08-31 CI incident: a win32 lib/ shadowed the
-        # darwin system perl modules → dlopen failure → EXIF silently
-        # empty on macOS). Fail loudly instead.
+        # If exiftool returns code 1 or 2 (e.g. minor warnings or unreadable single corrupt files),
+        # check if stdout still contains valid JSON for the valid files.
+        if exc.stdout and exc.stdout.strip().startswith("["):
+            try:
+                return json.loads(exc.stdout)
+            except Exception:
+                pass
+
+        # exiftool failed fatally (e.g. broken perl environment/dlopen failure)
         stderr_tail = (exc.stderr or "").strip()[-400:]
         raise RuntimeError(
             f"exiftool exited with code {exc.returncode} (broken install?): {stderr_tail}"

@@ -1,0 +1,112 @@
+name: gui-guards
+
+# Cross-platform CI Workflow for AutoCulling Desktop GUI Packaging & Installation Testing.
+# Runs on push to develop/master/feature/tauri-gui and pull requests.
+#
+# Platforms:
+# - macOS (Apple Silicon macos-14): Builds DMG, mounts volume, tests app & engine.
+# - Windows (windows-latest): Builds NSIS setup .exe + portable .zip, tests extraction & engine.
+
+on:
+  push:
+    branches: [develop, master, feature/tauri-gui]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: gui-guards-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gui-macos:
+    runs-on: macos-14
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.10"
+
+      - name: Install Runtime & Build Dependencies
+        run: |
+          uv venv .venv --python 3.10
+          uv pip install --python .venv/bin/python \
+            "opencv-python==5.0.0.93" "onnxruntime==1.23.2" "numpy>=1.26" \
+            "pillow>=10.0" "pillow-heif>=0.18.0" "av>=17.0" "scipy>=1.15" \
+            "pyinstaller" "pytest"
+
+      - name: Build macOS Desktop GUI Package (DMG + App)
+        run: |
+          .venv/bin/python packaging/build_gui.py
+
+      - name: Test macOS DMG Package & Execution
+        run: |
+          .venv/bin/python packaging/test_gui_package.py
+
+      - name: Upload macOS GUI Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutoCulling-macOS-DMG
+          path: dist/AutoCulling_*.dmg*
+          if-no-files-found: error
+
+  gui-windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.10"
+
+      - name: Install Runtime Dependencies & ExifTool
+        run: |
+          choco install exiftool -y --no-progress
+          uv venv .venv --python 3.10
+          uv pip install --python .venv `
+            "opencv-python==5.0.0.93" "onnxruntime==1.23.2" "numpy>=1.26" `
+            "pillow>=10.0" "pillow-heif>=0.18.0" "av>=17.0" "scipy>=1.15" `
+            "pyinstaller" "pytest"
+
+      - name: Build Windows Desktop GUI Packages (NSIS Setup + Portable ZIP)
+        run: |
+          .venv\Scripts\python.exe packaging/build_gui.py
+
+      - name: Test Windows GUI Packages
+        run: |
+          .venv\Scripts\python.exe packaging/test_gui_package.py
+
+      - name: Upload Windows GUI Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutoCulling-Windows-Packages
+          path: |
+            dist/AutoCulling_*.exe*
+            dist/AutoCulling_*.zip*
+          if-no-files-found: ignore

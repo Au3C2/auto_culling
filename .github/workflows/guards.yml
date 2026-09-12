@@ -150,10 +150,20 @@ jobs:
       - name: Performance — seed steady state (source CLI)
         timeout-minutes: 25
         run: |
-          .venv/bin/python benchmarks/run_benchmarks.py --workers 2 \
-            --seed-dir tests/ci/sample --count 120 --samples 2 \
-            --tolerance 0.75 --baseline-file tests/ci/ci_config.json \
-            --json build/ci_source.json
+          run_gate() {
+            .venv/bin/python benchmarks/run_benchmarks.py --workers 2 \
+              --seed-dir tests/ci/sample --count 120 --samples 2 \
+              --tolerance 0.65 --baseline-file tests/ci/ci_config.json \
+              --json build/ci_source.json
+          }
+          # Shared-runner noise is one-sided (load spikes only slow runs
+          # down); a single retry absorbs the flaky tail while genuine
+          # multi-minute regressions still fail both attempts.
+          if ! run_gate; then
+            echo "gate failed once; waiting 30s and retrying"
+            sleep 30
+            run_gate
+          fi
 
   perf-packaged:
     runs-on: macos-14
@@ -192,10 +202,18 @@ jobs:
           CULL_EXE="dist/auto_cull_v${VER}_macos_arm64/auto_cull_v${VER}_macos_arm64"
           echo "Using CULL_EXE: $CULL_EXE"
           test -x "$CULL_EXE" || { echo "Binary not found or not executable: $CULL_EXE"; ls -la dist/; exit 1; }
-          CULL_EXE="$CULL_EXE" .venv/bin/python benchmarks/run_benchmarks.py --workers 2 \
-            --seed-dir tests/ci/sample --count 120 --samples 2 \
-            --tolerance 0.75 --baseline-file tests/ci/ci_config.json \
-            --json build/ci_onedir.json
+          run_gate() {
+            CULL_EXE="$CULL_EXE" .venv/bin/python benchmarks/run_benchmarks.py --workers 2 \
+              --seed-dir tests/ci/sample --count 120 --samples 2 \
+              --tolerance 0.65 --baseline-file tests/ci/ci_config.json \
+              --json build/ci_onedir.json
+          }
+          # Same one-sided-noise retry rationale as perf-source.
+          if ! run_gate; then
+            echo "gate failed once; waiting 30s and retrying"
+            sleep 30
+            run_gate
+          fi
 
   # NEW: CPU deterministic truth (macOS copy).  Same repo, same gate count
   # and timeout as the Windows copies so the suite stays platform-symmetric.

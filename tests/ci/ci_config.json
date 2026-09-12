@@ -1,9 +1,9 @@
 {
-  "note": "Calibrated on the GitHub-hosted macos-14-arm64 runner: seed protocol count=200, samples=2, workers=2 (2026-08-28). This VM is ~10x slower than the local Apple M4 (JPG 8 vs 84 img/s) and has no ANE; the CI perf gate runs with tolerance 0.85 against these baselines. Re-calibrate (perf-calibrate workflow) if the runner image changes materially. The platforms.win32 block calibrates the windows-latest seed gate (count=120, samples=2, workers=4, 2026-08-28, 3 interleaved local runs, median-locked).",
+  "note": "macOS block re-calibrated 2026-09-12 on the GitHub-hosted macos-14-arm64 runner (run 34700486900, seed protocol count=200 samples=2 workers=2, ~10x slower than local Apple M4, no ANE). source baselines = fresh calibration medians (floor = x0.65). onedir baselines are deliberately LOWER than the solo calibration medians: gate runs execute right after a PyInstaller build on a hot VM and repeatedly measured 35-50% below the idle calibration (NEF onedir: idle 10.02 vs in-gate 4.98-5.80), so onedir floors are anchored to the worst in-gate observations x ~0.9 instead. Both pipelines gate with tolerance 0.65 + one retry (guards.yml). Re-calibrate (perf-calibrate workflow) if the runner image changes materially. The platforms.win32 block calibrates the windows-latest seed gate (count=120, samples=2, workers=4, 2026-08-28, 3 interleaved local runs, median-locked).",
   "seed_ratings": {},
   "baselines": {
-    "source": {"JPG": 7.88, "HEIF": 0.86, "ARW": 7.11, "NEF": 7.29},
-    "onedir": {"JPG": 7.32, "HEIF": 0.96, "ARW": 7.31, "NEF": 8.16}
+    "source": {"JPG": 6.92, "HEIF": 4.65, "ARW": 6.11, "NEF": 7.98},
+    "onedir": {"JPG": 7.1, "HEIF": 4.3, "ARW": 7.1, "NEF": 6.9}
   },
   "platforms": {
     "win32": {

@@ -74,6 +74,9 @@ def collect(fmt: str, seed: str, glob: str,
     exe = (env or {}).get("CULL_EXE")
     cmd = ([exe] if exe else [sys.executable, str(ROOT / "cull_photos.py")]) + [
         "--input-dir", str(dataset), "--workers", "2", "--force",
+        # P4 pinned: the user-facing default is `never`; guard comparisons
+        # must run the same policy on both sides of the diff.
+        "--p4-policy", "always",
         "--dry-run", "--dump-scores", str(csv_path),
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
@@ -176,6 +179,7 @@ def main() -> int:
                 cmd = ([os.environ.get("CULL_EXE")] if os.environ.get("CULL_EXE")
                        else [sys.executable, str(ROOT / "cull_photos.py")]) + [
                     "--input-dir", str(tmp), "--workers", "2", "--force",
+                    "--p4-policy", "always",
                     "--dry-run", "--dump-scores", str(csv_path),
                 ]
                 proc = subprocess.run(cmd, capture_output=True, text=True,

@@ -76,14 +76,19 @@ p4_model_checkpoints/*.onnx
 
 # macOS
 .DS_Store
+!packaging/dmg-assets/.DS_Store
 
 # Raw image files
 *.jpg
 !tests/test_img/*.jpg
 *.jpeg
 *.png
+!src-tauri/icons/*.png
+!src-tauri/icons/*.tiff
+!docs/assets/*.png
 *.bmp
 *.gif
+!src-tauri/icons/*.tiff
 *.tiff
 *.nef
 *.arw
@@ -108,3 +113,9 @@ auto_cull
 
 # Rust/Tauri build artifacts
 src-tauri/target/
+src-tauri/binaries/*.exe
+src-tauri/resources/
+!src-tauri/resources/WebView2Loader.dll
+
+# PyInstaller sidecar artifacts (built by packaging/build_gui.py, too large for git)
+src-tauri/binaries/

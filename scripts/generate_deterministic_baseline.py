@@ -81,7 +81,8 @@ def _collect(src_files: list[Path]) -> dict[str, tuple[int, float]]:
         env["PYTHONPATH"] = str(ROOT)
         cmd = [sys.executable, str(ROOT / "cull_photos.py"),
                "--input-dir", str(tmp), "--workers", "4",
-               "--force", "--dry-run", "--dump-scores", str(csv_path)]
+               "--force", "--p4-policy", "always",
+               "--dry-run", "--dump-scores", str(csv_path)]
         proc = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=600)
         if proc.returncode != 0:
             raise RuntimeError(f"cull_photos failed: {(proc.stderr or '')[-800:]}")
