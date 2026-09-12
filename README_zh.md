@@ -20,21 +20,44 @@
 
 ## 快速开始
 
-### 方式一：可执行文件（无需 Python）
+### 桌面 GUI（推荐）
 
-从 [GitHub Releases](https://github.com/Au3C2/AutoCullingF1/releases) 下载预编译二进制：
+从 [GitHub Releases](https://github.com/Au3C2/AutoCullingF1/releases) 下载安装包：
+
+| 平台 | 安装包 | 安装方式 |
+| :--- | :--- | :--- |
+| Windows | `AutoCulling_v*_win_x64_setup.exe` | 双击安装——按用户安装到 `%LOCALAPPDATA%\AutoCulling`，无需管理员权限 |
+| Windows | `AutoCulling_v*_win_x64_portable.zip` | 免安装——解压到任意位置，运行 `auto_culling.exe` |
+| macOS（Apple Silicon） | `AutoCulling_v*_macos_arm64.dmg` | 打开 DMG，将 `AutoCulling.app` 拖入 Applications |
+
+每个安装包都附带 `.sha256` 校验文件——用 `Get-FileHash -Algorithm SHA256`（Windows）
+或 `shasum -a 256`（macOS）验证。
+
+启动 `auto_culling.exe`（Windows）或 `AutoCulling.app`（macOS），选择相机直出的
+文件夹并运行——星级、拒绝标记与裁剪参数随扫描进度实时写入。应用内置完整 AI 引擎，
+安装目录为**平铺自包含结构**：`auto_culling.exe`（GUI）、`auto_culling_cli.exe`
+（命令行）、`auto_culling_engine.exe`（内部引擎）与 `lib/`（模型、exiftool、运行时）
+并列存放——请勿单独移动或删除其中任何一项。
+
+首次启动提示：Windows SmartScreen 可能对未签名安装包弹出确认；macOS 应用为 ad-hoc
+签名，首次启动可能需要右键 → 打开。
+
+### 内置命令行
+
+每个安装包同时附带控制台 CLI，与 GUI 共用同一引擎——适合脚本化与服务器批量处理：
 
 ```powershell
-# Windows
-.\auto_cull_v0.2_win_x64.exe --input-dir C:\Photos\F1 --recursive --force
+# Windows —— 默认安装目录（便携版为解压目录）
+& "$env:LOCALAPPDATA\AutoCulling\auto_culling_cli.exe" --input-dir C:\Photos\F1 --recursive --force
 ```
 
 ```bash
-# macOS（Apple Silicon）
-./auto_cull_v0.2_macos_arm64 --input-dir /path/to/photos --recursive --force
+# macOS
+/Applications/AutoCulling.app/Contents/Resources/auto_culling_cli \
+  --input-dir /path/to/photos --recursive --force
 ```
 
-二进制已内置 ONNX 模型与 exiftool，无需额外安装。省略 `--input-dir` 会弹出文件夹选择器。
+参数与 Python 版 CLI 完全一致（见下表）。省略 `--input-dir` 会弹出文件夹选择器。
 已评分的文件自动跳过（`--force` 强制重跑）。
 
 ### 方式二：从源码运行
@@ -49,6 +72,27 @@ python cull_photos.py --input-dir /path/to/photos --recursive --force
 ```
 
 省略 `--input-dir` 会打开小型 GUI（customtkinter）。
+
+### 从源码打包桌面安装包
+
+前置条件：Python 3.10+ 与 uv、[Rust 工具链](https://rustup.rs)、Node.js 18+
+（Tauri CLI 通过 `npx` 运行）。exiftool 与 ffmpeg 在 Windows 下已内置；macOS 下
+执行一次 `brew install exiftool ffmpeg`。
+
+```bash
+uv sync
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+python packaging/build_gui.py    # 调试 GUI 时可加 --skip-engine 跳过 PyInstaller 步骤
+```
+
+脚本会先编译 Python 引擎（PyInstaller onedir），再构建 Tauri 壳，产物输出到
+`dist/`：
+
+- **Windows**：`AutoCulling_v*_win_x64_setup.exe`（NSIS）+ `AutoCulling_v*_win_x64_portable.zip`
+- **macOS**：`AutoCulling_v*_macos_arm64.dmg` + `AutoCulling.app`
+
+每个产物自动生成 `.sha256`。CI（`.github/workflows/guards-gui.yml`）在每次 push
+时构建相同的安装包并对其运行安装/启动测试。
 
 ### 常用参数
 
@@ -115,12 +159,12 @@ python packaging/guards.py    # 精度 → 性能 → 构建 → 打包门，约
 ```
 
 CI（`.github/workflows/`）在 GitHub 托管的 macOS/Windows runner 上用已提交的种子样本
-跑同一套门禁。构建独立可执行文件：
+跑同一套门禁。构建目标：
 
 ```bash
 uv pip install pyinstaller
-python packaging/build.py            # onefile
-python packaging/build.py --onedir   # 推荐：无每次启动的解压/签名开销
+python packaging/build.py            # 独立 CLI onedir（精度守卫使用）
+python packaging/build_gui.py        # 桌面 GUI 安装包：setup / portable / DMG
 ```
 
 延伸阅读：[`results/performance_baseline.md`](results/performance_baseline.md)

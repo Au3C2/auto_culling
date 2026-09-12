@@ -263,7 +263,41 @@ gates pass); performance must be proven on the non-darwin runner.
   Requires the ~1.3 GB camera datasets (test_import/test_arw/test_nef) present.
 
 
+## GUI Packaging (Tauri, flat install layout — feature/tauri-gui, 2026-09-12)
+
+- Pipeline: `python packaging/build_gui.py` → PyInstaller onedir (`engine.spec`,
+  `CULL_ONEDIR=1`) → stage to `src-tauri/resources/engine/` → `tauri build`
+  (`--bundles nsis` on Windows, `app` on darwin) → collect artifacts + `.sha256`
+  into `dist/`. `--skip-engine` (alias `--skip-sidecar`) skips the PyInstaller step.
+- Install layout is FLAT on both platforms — one directory, no nested `sidecar/`:
+  `auto_culling.exe` (GUI) + `auto_culling_cli.exe` (console CLI) +
+  `auto_culling_engine.exe` (windowed engine, spawned by the GUI over Stdio JSON
+  Lines) + `WebView2Loader.dll` + `lib/` (PyInstaller deps via
+  `contents_directory="lib"`, default was `_internal`; holds `models/` and
+  `external/exiftool/`). Windows NSIS installs to `%LOCALAPPDATA%\AutoCulling`
+  (`installMode: currentUser`); the portable zip mirrors the same layout; macOS
+  maps it into `AutoCulling.app/Contents/Resources/` root.
+- Flattening mechanism: `tauri.conf.json` resource map entry
+  `"resources/engine": ""` — an empty target makes Tauri walk the directory flat
+  into the resource root (tauri-utils Walk branch, `dest.join(strip_prefix)`).
+- Engine resolution (`src-tauri/src/main.rs`, release builds): candidates are
+  exe-dir root, macOS `Contents/MacOS → ../Resources` fallback, then
+  `resource_dir()`. Dev mode (repo checkout with `.venv`) runs
+  `python cull_photos.py --json-lines` instead — a sandbox install INSIDE the
+  repo tree therefore hits dev mode; test bundled-engine spawn outside the repo.
+- GUI↔engine event channel: engine startup failures emit `engine-error`
+  (renamed from `sidecar-error`); engine spawn logs go to `gui.log` next to the
+  GUI binary (`spawn bundled engine` / `engine spawned and alive` markers used
+  by `packaging/test_gui_package.py`).
+- Verified 2026-09-12: gui-guards #24 green on both platforms (DMG mount test +
+  NSIS silent install + portable extraction + engine spawn); local Windows
+  NSIS silent install layout + bundled-engine spawn outside repo tree.
+
 ## Packaging (single-file PyInstaller, macOS-first)
+
+CLI-engine packaging used by the precision/perf guards and the release gates
+(`packaging/build.py`, spec `cull_photos.spec`; planned to converge on
+`engine.spec`):
 
 - Pipeline: `python packaging/build.py` (onefile, copies to root) / additional
   `--onedir` (directory form). One cross-platform spec `cull_photos.spec`
@@ -304,22 +338,50 @@ gates pass); performance must be proven on the non-darwin runner.
   knife-edge file IMG_20260314_160318_240.jpg (3→-1 at workers=4/6) — keep
   the .venv untouched by pip swaps; a mixed cv2 directory also flips it.
 
-## CI (GitHub Actions, macOS) — three guarded concerns
+## CI (GitHub Actions) — four workflows
 
-- workflow `.github/workflows/guards.yml`; entry `tests/ci/guard.py`.
-  Seeds: tests/ci/sample/ = ONE file per format (~70MB total, .gitignore
-  carve-out), replicated to ~500 files at runtime — no camera datasets in
-  the repo.
+1. **gui-guards** (`.github/workflows/guards-gui.yml`) — GUI packaging guard.
+   Triggers: push to develop/master/**feature/tauri-gui**, PRs, manual. Two jobs:
+   `gui-macos` (DMG build + mount test: .app structure, engine onedir `lib/`
+   layout, CLI `--help`, stdio handshake, installed-app self-spawn, HEIF
+   frozen-engine guard) and `gui-windows` (NSIS silent install + portable zip
+   extraction + engine spawn). Uploads both platform artifacts. This is the
+   ACTIVE guard on feature/tauri-gui.
+2. **culling-guards** (`.github/workflows/guards.yml`) — engine source+packaged
+   gates; ALL jobs run on macos-14 despite the neutral name. Triggers:
+   develop/master/PR only (feature branches are NOT covered). Jobs:
+   `perf-calibrate` (manual-dispatch only, writes `tests/ci/ci_config.json`),
+   `precision`, `perf-source`, `perf-packaged`, `deterministic-cpu`.
+3. **culling-guards-windows** (`.github/workflows/guards-windows.yml`) —
+   windows-latest, develop/master/PR only. Jobs: `deterministic-cpu`
+   (70-file strict gate), `gpu-alignment` (CUDA vs deterministic truth),
+   `perf-seed`. NOT a symmetric twin of #2 — different job set.
+4. **release** (`.github/workflows/release.yml`) — tag push `v*` / manual
+   dispatch. Per platform: precision gate (`build.py --onedir`) + perf gate +
+   GUI build (`build_gui.py`) + warm-start smoke; publishes a draft release
+   with setup/portable/dmg + per-artifact `.sha256`. CLI is bundled inside
+   every GUI package (no separate CLI artifacts since v0.3). Release does not
+   gate on guard runs — it re-runs its own precision/perf gates.
+
+Shared facts:
+- Seeds: `tests/ci/sample/` = ONE file per format (~70 MB total, .gitignore
+  carve-out), replicated to ~500 files at runtime — no camera datasets in the
+  repo.
 - Precision (no calibration): `ci_seed_precision.py --compare` scores the
-  same replicated dataset with source + packaged binary and asserts
-  per-file raw_score equality (±0.002 tolerance — source alone jitters
-  ±0.0004 run-to-run from ANE/P4) and rating-multiset equality. Per-copy
-  ratings are NOT uniform (identical EXIF → one burst → Top-N downgrades),
-  which is why the gate is consistency-based.
-- Packaging flow: `build.py --onedir` + artifact check (always runs).
-- Performance: `run_benchmarks.py --seed-dir tests/ci/sample
-  --baseline-file tests/ci/ci_config.json --tolerance 0.85`. GitHub-hosted macOS
-  runners have NO ANE + different silicon → baselines MUST be measured on
-  the runner via the manual `perf-calibrate` workflow and committed to
-  tests/ci/ci_config.json; skipped until then. Local seed-protocol reference
+  same replicated dataset with source + packaged binary and asserts per-file
+  raw_score equality (±0.002 tolerance — source alone jitters ±0.0004
+  run-to-run from ANE/P4) and rating-multiset equality. Per-copy ratings are
+  NOT uniform (identical EXIF → one burst → Top-N downgrades), which is why
+  the gate is consistency-based.
+- Performance: `run_benchmarks.py --seed-dir tests/ci/sample --baseline-file
+  tests/ci/ci_config.json --tolerance 0.85`. GitHub-hosted macOS runners have
+  NO ANE + different silicon → baselines MUST be measured on the runner via
+  the manual `perf-calibrate` workflow and committed to
+  `tests/ci/ci_config.json`; skipped until then. Local seed-protocol reference
   (Apple M4, source, w4): JPG 84.5 / HEIF 42.6 / ARW 48.7 / NEF 69.9.
+- Known gaps / planned rework: (a) rename to a consistent scheme
+  (`engine-guards-macos.yml` / `engine-guards-windows.yml` / `gui-guards.yml`,
+  filename = workflow name — `guards-gui.yml` currently registers as
+  `gui-guards`); (b) guards should consume the `engine.spec` onedir instead of
+  building a second `cull_photos.spec` onedir; (c) feature branches only get
+  gui-guards — merge to master via PR so the engine gates run.
