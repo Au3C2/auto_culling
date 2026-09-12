@@ -463,6 +463,7 @@ class CullingEngine:
         select_best_n(scores, top_n=self.config.top_n)
         for s in scores:
             if s.rating != pre_ratings.get(s.path):
+                label = str(s.path) if self.config.log_full_paths else s.path.name
                 log.info(
                     FRAME_LOG_FMT, label, s.s_sharp, s.s_comp, s.raw_score,
                     s.rating, "  (topn_final)"
