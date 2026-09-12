@@ -675,8 +675,10 @@
     });
 
     initSplitter();
-    loadSavedParams();
+    // Listeners must exist before loadSavedParams — it auto-triggers a scan
+    // of the saved directory, and a fast engine reply would otherwise be lost.
     setupEventListeners();
+    loadSavedParams();
   }
 
   window.addEventListener('DOMContentLoaded', initUI);
