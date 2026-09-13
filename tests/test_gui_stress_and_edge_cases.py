@@ -195,4 +195,9 @@ def test_multiple_consecutive_runs_on_same_process(engine_proc: EngineChannel):
     engine_proc.send({"cmd": "run", "dir": str(img_dir), "config": {"dry_run": True, "top_n": 3}})
     done4 = engine_proc.wait_for_event("done", timeout=15.0)
     assert done4 is not None
-    assert done4.get("total") == 6
+    # Protocol invariant — never hardcode the dataset size: failed frames are
+    # excluded from total, so keep + reject + failed must cover the scan.
+    # Direct indexing (not .get with default) so a malformed done event that
+    # omits any field fails the schema check.
+    assert done4["keep"] + done4["reject"] == done4["total"]
+    assert done4["failed"] == 0

@@ -38,8 +38,9 @@
     }
 
     if (cmd === "scan") {
-      const paths = {};
-      MOCK_FILES.forEach(f => { paths[f.name] = f.path; });
+      // Array of FULL paths — matches the real engine protocol
+      // (basenames collide in recursive scans).
+      const paths = MOCK_FILES.map(f => f.path);
       setTimeout(() => {
         emitEvent("scanned", { count: MOCK_FILES.length, paths });
       }, 50);
@@ -84,6 +85,7 @@
 
         emitEvent("frame", {
           name: item.name,
+          path: item.path,
           rating: item.rating,
           sharp: item.sharp,
           comp: item.comp,

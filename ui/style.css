@@ -62,8 +62,18 @@ body {
   letter-spacing: -0.01em;
   height: 100vh;
   overflow: hidden;
-  user-select: none;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Non-text UI controls only — keep logs, status and result text selectable
+   (developer-facing tool). */
+.tau-btn,
+.tau-select,
+.tau-tab,
+.tau-toggle-custom,
+.tau-logo-badge,
+.tau-resizer {
+  user-select: none;
 }
 
 .tau-app {

@@ -219,8 +219,13 @@ fn ensure_engine(app: &AppHandle, state: &mut EngineState) -> Result<(), String>
                                     }
                                 }
                             }
-                        // Emit event to webview
-                        let _ = app_clone.emit(&event_type, val);
+                        // Emit event to webview — EXCEPT "preview": its
+                        // payload carries the full base64 image and is
+                        // already delivered through the oneshot invoke
+                        // response; re-emitting doubles the data transfer.
+                        if event_type != "preview" {
+                            let _ = app_clone.emit(&event_type, val);
+                        }
                     }
                 }
             }
@@ -385,8 +390,7 @@ async fn export_csv(
     app: AppHandle,
     state: State<'_, Arc<Mutex<EngineState>>>,
     dir: String,
-) -> Result<String, String> {
-    // The engine holds the scored results — forward the request and let the
+) -> Result<String, String> {    // The engine holds the scored results — forward the request and let the
     // engine write <dir>/scores.csv; the UI gets confirmation via the
     // "export_done" event (or "error" on failure).
     let path = PathBuf::from(&dir).join("scores.csv");
@@ -397,6 +401,69 @@ async fn export_csv(
     let mut guard = state.lock().unwrap();
     send_engine_command(&app, &mut guard, payload)?;
     Ok(path.to_string_lossy().to_string())
+}
+
+/// Secrets (Roboflow API key) live in the OS credential store
+/// (Windows Credential Manager / macOS Keychain) — never in the webview's
+/// plaintext localStorage. The key namespace is a strict allowlist so the
+/// webview can only ever touch this app's own single credential.
+const SECRET_SERVICE: &str = "autoculling";
+const SECRET_KEYS: &[&str] = &["rf_api_key"];
+
+fn secret_entry(key: &str) -> Result<keyring::Entry, String> {
+    if !SECRET_KEYS.contains(&key) {
+        return Err(format!("unsupported secret key: {key}"));
+    }
+    keyring::Entry::new(SECRET_SERVICE, key).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn secret_get(_app: AppHandle, key: String) -> Result<Option<String>, String> {
+    log_line(&format!("secret_get called: {key}"));
+    let entry = secret_entry(&key)?;
+    match entry.get_password() {
+        Ok(v) => Ok(Some(v)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+async fn secret_set(_app: AppHandle, key: String, value: String) -> Result<(), String> {
+    log_line(&format!("secret_set called: {key} (len {})", value.len()));
+    let entry = secret_entry(&key)?;
+    if value.is_empty() {
+        match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(e.to_string()),
+        }
+    } else {
+        entry.set_password(&value).map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod secret_tests {
+    use super::*;
+
+    #[test]
+    fn keyring_roundtrip_on_windows() {
+        let value = format!("probe-{}", std::process::id());
+        let entry = secret_entry("rf_api_key").expect("entry creation failed");
+        entry.set_password(&value).expect("set_password failed");
+        let read_back = entry.get_password().expect("get_password failed");
+        assert_eq!(read_back, value);
+        entry.delete_credential().expect("delete failed");
+        assert!(matches!(
+            entry.get_password(),
+            Err(keyring::Error::NoEntry)
+        ));
+    }
+
+    #[test]
+    fn secret_key_allowlist_rejects_unknown() {
+        assert!(secret_entry("anything_else").is_err());
+    }
 }
 
 fn main() {
@@ -443,7 +510,9 @@ fn main() {
             run,
             cancel,
             preview,
-            export_csv
+            export_csv,
+            secret_get,
+            secret_set
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

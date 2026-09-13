@@ -87,19 +87,55 @@
     { id: 'pDryRun', key: 'dry_run', type: 'bool', default: false },
   ];
 
+  // Params persisted through the OS credential store (Rust keyring) instead
+  // of localStorage — plaintext webview storage is extractable from the
+  // profile directory.
+  const SECRET_KEYS = new Set(['rf_api_key']);
+
   function loadSavedParams() {
     PARAMS.forEach((p) => {
       const el = $(p.id);
       if (!el) return;
-      const val = localStorage.getItem(`ac-param-${p.key}`);
-      if (val !== null) {
-        if (p.type === 'bool') el.checked = val === 'true';
-        else el.value = val;
+      if (SECRET_KEYS.has(p.key)) {
+        // One-time migration: a legacy plaintext value in localStorage moves
+        // into the credential store BEFORE the plaintext copy is dropped, so
+        // upgrading users keep their saved key.
+        const legacy = localStorage.getItem(`ac-param-${p.key}`);
+        localStorage.removeItem(`ac-param-${p.key}`);
+        invokeTauri('secret_get', { key: p.key }).then((v) => {
+          if (v) {
+            el.value = v;
+          } else if (legacy) {
+            el.value = legacy;
+            return invokeTauri('secret_set', { key: p.key, value: legacy });
+          }
+          return null;
+        }).catch(() => {});
+      } else {
+        const val = localStorage.getItem(`ac-param-${p.key}`);
+        if (val !== null) {
+          if (p.type === 'bool') el.checked = val === 'true';
+          else el.value = val;
+        }
       }
-      el.addEventListener('change', () => {
+      const persist = () => {
         const currentVal = p.type === 'bool' ? el.checked : el.value;
+        if (SECRET_KEYS.has(p.key)) {
+          invokeTauri('secret_set', { key: p.key, value: String(currentVal) })
+            .then(() => appendLog(`[Secret] ${p.key} stored in the OS credential store`))
+            .catch((e) => appendLog(`[Secret Error] ${p.key}: ${e}`));
+          return;
+        }
         localStorage.setItem(`ac-param-${p.key}`, currentVal);
-      });
+      };
+      // 'input' fires per keystroke (reliable in WebView2); 'change' is kept
+      // for checkboxes/selects and as a blur-time fallback.
+      if (p.type === 'bool' || el.tagName === 'SELECT') {
+        el.addEventListener('change', persist);
+      } else {
+        el.addEventListener('input', persist);
+        el.addEventListener('change', persist);
+      }
     });
 
     const savedRatio = localStorage.getItem('ac-table-ratio');
@@ -435,16 +471,27 @@
     return `row-${item.path.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
   }
 
+  // Escape interpolated values before they go through innerHTML — filenames
+  // and engine veto strings are user/external-controlled (CSP is not a
+  // substitute for escaping).
+  function esc(value) {
+    return String(value).replace(/[&<>"']/g, (c) => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+  }
+
   function buildRowHtml(item) {
     const isSelected = state.selectedPhoto && state.selectedPhoto.path === item.path;
-    const ratingDisplay = item.status === 'pending'
+    const scored = item.status !== 'pending' && item.status !== 'decode_failed';
+    const num = (v, digits) => (scored && Number.isFinite(v) ? v.toFixed(digits) : '—');
+    const ratingDisplay = item.status === 'pending' || item.status === 'decode_failed'
       ? '<span style="color:#475569;">—</span>'
       : item.rating > 0
         ? `<span class="tau-stars">${'★'.repeat(item.rating)}</span>`
         : '<span class="tau-reject-tag">REJECT</span>';
 
     const reasonDisplay = item.veto
-      ? `<span class="tau-veto-desc" title="${item.veto}">${item.veto}</span>`
+      ? `<span class="tau-veto-desc" title="${esc(item.veto)}">${esc(item.veto)}</span>`
       : item.rating > 0
         ? '<span class="tau-pass-tag">PASSED</span>'
         : '—';
@@ -458,12 +505,12 @@
           : item.status));
 
     return `
-      <tr id="${rowIdFor(item)}" data-path="${item.path}" class="${isSelected ? 'selected' : ''}">
-        <td title="${item.name}" style="font-family: var(--tau-font-mono); font-weight: 500;">${item.name}</td>
+      <tr id="${rowIdFor(item)}" data-path="${esc(item.path)}" class="${isSelected ? 'selected' : ''}">
+        <td title="${esc(item.name)}" style="font-family: var(--tau-font-mono); font-weight: 500;">${esc(item.name)}</td>
         <td class="tau-th-num">${ratingDisplay}</td>
-        <td class="tau-th-num" style="font-family: var(--tau-font-mono);">${item.sharp ? item.sharp.toFixed(3) : '—'}</td>
-        <td class="tau-th-num" style="font-family: var(--tau-font-mono);">${item.comp ? item.comp.toFixed(3) : '—'}</td>
-        <td class="tau-th-num" style="font-family: var(--tau-font-mono); font-weight: 600;">${item.raw ? item.raw.toFixed(2) : '—'}</td>
+        <td class="tau-th-num" style="font-family: var(--tau-font-mono);">${num(item.sharp, 3)}</td>
+        <td class="tau-th-num" style="font-family: var(--tau-font-mono);">${num(item.comp, 3)}</td>
+        <td class="tau-th-num" style="font-family: var(--tau-font-mono); font-weight: 600;">${num(item.raw, 2)}</td>
         <td>${reasonDisplay}</td>
         <td class="tau-th-center" style="font-family: var(--tau-font-mono); font-size: 10px;">${statusDisplay}</td>
       </tr>
@@ -530,10 +577,12 @@
 
     els.previewTitle.textContent = item.name;
     els.previewScoreDetails.style.display = 'flex';
+    const pillScored = item.status !== 'pending' && item.status !== 'decode_failed';
+    const pillNum = (v, digits) => (pillScored && Number.isFinite(v) ? v.toFixed(digits) : '-');
     els.pillRating.textContent = `RATING: ${item.rating > 0 ? `${item.rating}★` : (item.rating === -1 ? 'REJECT' : '-')}`;
-    els.pillSharp.textContent = `SHARP: ${item.sharp ? item.sharp.toFixed(3) : '-'}`;
-    els.pillComp.textContent = `COMP: ${item.comp ? item.comp.toFixed(3) : '-'}`;
-    els.pillRaw.textContent = `RAW: ${item.raw ? item.raw.toFixed(2) : '-'}`;
+    els.pillSharp.textContent = `SHARP: ${pillNum(item.sharp, 3)}`;
+    els.pillComp.textContent = `COMP: ${pillNum(item.comp, 3)}`;
+    els.pillRaw.textContent = `RAW: ${pillNum(item.raw, 2)}`;
     els.pillReason.textContent = `REASON: ${item.veto || (item.rating > 0 ? 'PASSED' : 'QUEUED')}`;
 
     // Request Base64 preview with bounding boxes
