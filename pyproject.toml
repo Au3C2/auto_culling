@@ -1,6 +1,6 @@
 [project]
 name = "AutoCullingF1"
-version = "0.3"
+version = "0.4"
 description = "F1 motorsport photo auto-culling (ONNX LITE VERSION)"
 readme = "README.md"
 requires-python = ">=3.10"
