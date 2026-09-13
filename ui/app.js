@@ -97,10 +97,19 @@
       const el = $(p.id);
       if (!el) return;
       if (SECRET_KEYS.has(p.key)) {
-        // Drop any legacy plaintext copy from localStorage.
+        // One-time migration: a legacy plaintext value in localStorage moves
+        // into the credential store BEFORE the plaintext copy is dropped, so
+        // upgrading users keep their saved key.
+        const legacy = localStorage.getItem(`ac-param-${p.key}`);
         localStorage.removeItem(`ac-param-${p.key}`);
         invokeTauri('secret_get', { key: p.key }).then((v) => {
-          if (v) el.value = v;
+          if (v) {
+            el.value = v;
+          } else if (legacy) {
+            el.value = legacy;
+            return invokeTauri('secret_set', { key: p.key, value: legacy });
+          }
+          return null;
         }).catch(() => {});
       } else {
         const val = localStorage.getItem(`ac-param-${p.key}`);
@@ -109,14 +118,24 @@
           else el.value = val;
         }
       }
-      el.addEventListener('change', () => {
+      const persist = () => {
         const currentVal = p.type === 'bool' ? el.checked : el.value;
         if (SECRET_KEYS.has(p.key)) {
-          invokeTauri('secret_set', { key: p.key, value: String(currentVal) }).catch(() => {});
+          invokeTauri('secret_set', { key: p.key, value: String(currentVal) })
+            .then(() => appendLog(`[Secret] ${p.key} stored in the OS credential store`))
+            .catch((e) => appendLog(`[Secret Error] ${p.key}: ${e}`));
           return;
         }
         localStorage.setItem(`ac-param-${p.key}`, currentVal);
-      });
+      };
+      // 'input' fires per keystroke (reliable in WebView2); 'change' is kept
+      // for checkboxes/selects and as a blur-time fallback.
+      if (p.type === 'bool' || el.tagName === 'SELECT') {
+        el.addEventListener('change', persist);
+      } else {
+        el.addEventListener('input', persist);
+        el.addEventListener('change', persist);
+      }
     });
 
     const savedRatio = localStorage.getItem('ac-table-ratio');
@@ -463,6 +482,8 @@
 
   function buildRowHtml(item) {
     const isSelected = state.selectedPhoto && state.selectedPhoto.path === item.path;
+    const scored = item.status !== 'pending' && item.status !== 'decode_failed';
+    const num = (v, digits) => (scored && Number.isFinite(v) ? v.toFixed(digits) : '—');
     const ratingDisplay = item.status === 'pending' || item.status === 'decode_failed'
       ? '<span style="color:#475569;">—</span>'
       : item.rating > 0
@@ -487,9 +508,9 @@
       <tr id="${rowIdFor(item)}" data-path="${esc(item.path)}" class="${isSelected ? 'selected' : ''}">
         <td title="${esc(item.name)}" style="font-family: var(--tau-font-mono); font-weight: 500;">${esc(item.name)}</td>
         <td class="tau-th-num">${ratingDisplay}</td>
-        <td class="tau-th-num" style="font-family: var(--tau-font-mono);">${Number.isFinite(item.sharp) ? item.sharp.toFixed(3) : '—'}</td>
-        <td class="tau-th-num" style="font-family: var(--tau-font-mono);">${Number.isFinite(item.comp) ? item.comp.toFixed(3) : '—'}</td>
-        <td class="tau-th-num" style="font-family: var(--tau-font-mono); font-weight: 600;">${Number.isFinite(item.raw) ? item.raw.toFixed(2) : '—'}</td>
+        <td class="tau-th-num" style="font-family: var(--tau-font-mono);">${num(item.sharp, 3)}</td>
+        <td class="tau-th-num" style="font-family: var(--tau-font-mono);">${num(item.comp, 3)}</td>
+        <td class="tau-th-num" style="font-family: var(--tau-font-mono); font-weight: 600;">${num(item.raw, 2)}</td>
         <td>${reasonDisplay}</td>
         <td class="tau-th-center" style="font-family: var(--tau-font-mono); font-size: 10px;">${statusDisplay}</td>
       </tr>
@@ -556,10 +577,12 @@
 
     els.previewTitle.textContent = item.name;
     els.previewScoreDetails.style.display = 'flex';
+    const pillScored = item.status !== 'pending' && item.status !== 'decode_failed';
+    const pillNum = (v, digits) => (pillScored && Number.isFinite(v) ? v.toFixed(digits) : '-');
     els.pillRating.textContent = `RATING: ${item.rating > 0 ? `${item.rating}★` : (item.rating === -1 ? 'REJECT' : '-')}`;
-    els.pillSharp.textContent = `SHARP: ${item.sharp ? item.sharp.toFixed(3) : '-'}`;
-    els.pillComp.textContent = `COMP: ${item.comp ? item.comp.toFixed(3) : '-'}`;
-    els.pillRaw.textContent = `RAW: ${item.raw ? item.raw.toFixed(2) : '-'}`;
+    els.pillSharp.textContent = `SHARP: ${pillNum(item.sharp, 3)}`;
+    els.pillComp.textContent = `COMP: ${pillNum(item.comp, 3)}`;
+    els.pillRaw.textContent = `RAW: ${pillNum(item.raw, 2)}`;
     els.pillReason.textContent = `REASON: ${item.veto || (item.rating > 0 ? 'PASSED' : 'QUEUED')}`;
 
     // Request Base64 preview with bounding boxes

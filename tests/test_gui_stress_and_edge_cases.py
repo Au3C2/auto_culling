@@ -197,5 +197,7 @@ def test_multiple_consecutive_runs_on_same_process(engine_proc: EngineChannel):
     assert done4 is not None
     # Protocol invariant — never hardcode the dataset size: failed frames are
     # excluded from total, so keep + reject + failed must cover the scan.
-    assert done4.get("keep", 0) + done4.get("reject", 0) == done4.get("total")
-    assert done4.get("failed", 0) == 0
+    # Direct indexing (not .get with default) so a malformed done event that
+    # omits any field fails the schema check.
+    assert done4["keep"] + done4["reject"] == done4["total"]
+    assert done4["failed"] == 0

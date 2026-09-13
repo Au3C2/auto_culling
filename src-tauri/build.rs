@@ -4,7 +4,10 @@ fn main() {
     // checkout is broken. Fail loudly instead of writing a 0-byte placeholder
     // that would get packaged into a GUI that cannot start.
     let wv2_path = std::path::Path::new("resources/WebView2Loader.dll");
-    if !wv2_path.exists() {
+    let wv2_ok = std::fs::metadata(wv2_path)
+        .map(|m| m.is_file() && m.len() > 0)
+        .unwrap_or(false);
+    if !wv2_ok {
         panic!(
             "resources/WebView2Loader.dll is missing — restore it from git \
              (git checkout -- src-tauri/resources/WebView2Loader.dll); \

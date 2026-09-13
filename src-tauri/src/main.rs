@@ -405,10 +405,22 @@ async fn export_csv(
 
 /// Secrets (Roboflow API key) live in the OS credential store
 /// (Windows Credential Manager / macOS Keychain) — never in the webview's
-/// plaintext localStorage.
+/// plaintext localStorage. The key namespace is a strict allowlist so the
+/// webview can only ever touch this app's own single credential.
+const SECRET_SERVICE: &str = "autoculling";
+const SECRET_KEYS: &[&str] = &["rf_api_key"];
+
+fn secret_entry(key: &str) -> Result<keyring::Entry, String> {
+    if !SECRET_KEYS.contains(&key) {
+        return Err(format!("unsupported secret key: {key}"));
+    }
+    keyring::Entry::new(SECRET_SERVICE, key).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn secret_get(_app: AppHandle, key: String) -> Result<Option<String>, String> {
-    let entry = keyring::Entry::new("autoculling", &key).map_err(|e| e.to_string())?;
+    log_line(&format!("secret_get called: {key}"));
+    let entry = secret_entry(&key)?;
     match entry.get_password() {
         Ok(v) => Ok(Some(v)),
         Err(keyring::Error::NoEntry) => Ok(None),
@@ -418,7 +430,8 @@ async fn secret_get(_app: AppHandle, key: String) -> Result<Option<String>, Stri
 
 #[tauri::command]
 async fn secret_set(_app: AppHandle, key: String, value: String) -> Result<(), String> {
-    let entry = keyring::Entry::new("autoculling", &key).map_err(|e| e.to_string())?;
+    log_line(&format!("secret_set called: {key} (len {})", value.len()));
+    let entry = secret_entry(&key)?;
     if value.is_empty() {
         match entry.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
@@ -426,6 +439,30 @@ async fn secret_set(_app: AppHandle, key: String, value: String) -> Result<(), S
         }
     } else {
         entry.set_password(&value).map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod secret_tests {
+    use super::*;
+
+    #[test]
+    fn keyring_roundtrip_on_windows() {
+        let value = format!("probe-{}", std::process::id());
+        let entry = secret_entry("rf_api_key").expect("entry creation failed");
+        entry.set_password(&value).expect("set_password failed");
+        let read_back = entry.get_password().expect("get_password failed");
+        assert_eq!(read_back, value);
+        entry.delete_credential().expect("delete failed");
+        assert!(matches!(
+            entry.get_password(),
+            Err(keyring::Error::NoEntry)
+        ));
+    }
+
+    #[test]
+    fn secret_key_allowlist_rejects_unknown() {
+        assert!(secret_entry("anything_else").is_err());
     }
 }
 
