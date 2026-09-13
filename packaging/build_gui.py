@@ -185,6 +185,16 @@ def build_macos_dmg(dist_dir: Path, ver: str) -> Path | None:
     if vol_icns.exists():
         shutil.copy2(vol_icns, stage / ".VolumeIcon.icns")
 
+    # Resign the app bundle ad-hoc to seal all newly added resources and bin files.
+    # Without this, injecting engine/lib files invalidates the linker-signed signature,
+    # causing macOS Gatekeeper / AppleSystemPolicy to flag the app as damaged.
+    staged_app = stage / "AutoCulling.app"
+    print(f"Signing staged app bundle ad-hoc: {staged_app}")
+    subprocess.run(
+        ["codesign", "--force", "--deep", "-s", "-", str(staged_app)],
+        check=True,
+    )
+
     dst_dmg = dist_dir / f"AutoCulling_v{ver}_macos_arm64.dmg"
     if dst_dmg.exists():
         dst_dmg.unlink()
